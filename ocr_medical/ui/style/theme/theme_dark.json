@@ -1,22 +1,45 @@
 {
-  "font": {
-    "family": "Inter",
-    "heading2": { "size": 20, "weight": "600", "color": "#ECF0F1" },
-    "normal": { "size": 14, "weight": "400", "color": "#ECF0F1" },
-    "secondary": { "size": 14, "weight": "400", "color": "#95A5A6" },
-    "muted": { "size": 12, "weight": "400", "color": "#7F8C8D" }
+  "theme": {
+    "name": "light",
+    "version": "1.0.0",
+    "author": "Minh Khanh",
+    "description": "A light theme for the medical OCR application."
   },
   "color": {
-    "primary": "#00A8FF",
-    "primary_hover": "#007ACC",
-    "background": "#1E272E",
-    "background_panel": "#2C3A47",
-    "border": "#3C4A57",
-    "text_primary": "#ECF0F1",
-    "text_secondary": "#95A5A6",
-    "text_muted": "#7F8C8D"
+    "background": {
+      "base": "#F6F8FB",
+      "panel": "#000000",
+      "drag_area": "#ECF2FE"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#175CD3",
+      "muted": "#ADB5BD",
+      "placeholder": "#CED4DA"
+    },
+    "border": {
+      "default": "#ECE9E9",
+      "focus": "#4A90E2",
+      "drag_area": "#A0C4FF"
+    },
+    "state": {
+      "primary": {
+        "hover": "#357ABD",
+        "active": "#2C5AA0"
+      },
+      "secondary": {
+        "hover": "#F7F4F4",
+        "active": "#ECF2FE" 
+      }
+    }
   },
-  "layout": {
-    "padding": 16
+  "typography": {
+    "family": "Inter",
+    "heading1": { "size": 25, "weight": 800 },
+    "heading2": { "size": 16, "weight": 800 },
+    "normal":   { "size": 14, "weight": 400 },
+    "secondary":{ "size": 16, "weight": 800 },
+    "muted":    { "size": 12, "weight": 400 },
+    "placeholder": { "size": 14, "weight": 400 }
   }
 }

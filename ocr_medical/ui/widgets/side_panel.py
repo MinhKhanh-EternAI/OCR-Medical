@@ -1,7 +1,5 @@
 from __future__ import annotations
 from pathlib import Path
-import json
-
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -10,17 +8,21 @@ from PySide6.QtWidgets import (
     QWidget,
     QSizePolicy,
     QSpacerItem,
+    QPushButton,
 )
 
 from ui.style.style_loader import load_svg_colored
+from ui.style.theme_manager import ThemeManager
 
 
-class NavButton(QLabel):
+class NavButton(QWidget):
     """Custom nav button với icon đổi màu theo trạng thái"""
+
     def __init__(self, key: str, text: str, icon_path: Path, theme_data: dict, parent=None):
-        from PySide6.QtWidgets import QPushButton
         super().__init__(parent)
-        self.btn = QPushButton(f"  {text}", parent)
+
+        # Tạo QPushButton
+        self.btn = QPushButton(f"  {text}", self)
         self.btn.setObjectName(f"NavBtn__{key}")
         self.btn.setProperty("nav", True)
         self.btn.setCheckable(True)
@@ -34,8 +36,10 @@ class NavButton(QLabel):
         self.hover_color = theme_data["color"]["text"]["primary"]
         self.active_color = theme_data["color"]["text"]["secondary"]
 
+        # Set icon mặc định
         if icon_path.exists():
-            self.btn.setIcon(load_svg_colored(icon_path, self.normal_color, 20))
+            self.btn.setIcon(load_svg_colored(
+                icon_path, self.normal_color, 20))
             self.btn.setIconSize(QSize(20, 20))
 
         # Khi toggle (active)
@@ -49,19 +53,24 @@ class NavButton(QLabel):
         return self.btn
 
     def _on_toggled(self, checked: bool):
+        """Đổi màu icon khi active / inactive"""
         if self.icon_path.exists():
             color = self.active_color if checked else self.normal_color
             self.btn.setIcon(load_svg_colored(self.icon_path, color, 20))
 
     def _on_enter(self, event):
+        """Đổi màu icon khi hover"""
         if self.icon_path.exists() and not self.btn.isChecked():
-            self.btn.setIcon(load_svg_colored(self.icon_path, self.hover_color, 20))
-        return super(type(self.btn), self.btn).enterEvent(event)
+            self.btn.setIcon(load_svg_colored(
+                self.icon_path, self.hover_color, 20))
+        QPushButton.enterEvent(self.btn, event)
 
     def _on_leave(self, event):
+        """Trả lại màu icon khi rời hover"""
         if self.icon_path.exists() and not self.btn.isChecked():
-            self.btn.setIcon(load_svg_colored(self.icon_path, self.normal_color, 20))
-        return super(type(self.btn), self.btn).leaveEvent(event)
+            self.btn.setIcon(load_svg_colored(
+                self.icon_path, self.normal_color, 20))
+        QPushButton.leaveEvent(self.btn, event)
 
 
 class SidePanel(QWidget):
@@ -71,9 +80,12 @@ class SidePanel(QWidget):
         super().__init__(parent)
 
         self.setObjectName("SidePanel")
+
         self.theme_manager = theme_manager
         theme_data = theme_manager.get_theme_data()
+        self.version = theme_data["theme"]["version"]
 
+        # Layout chính
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
@@ -83,15 +95,13 @@ class SidePanel(QWidget):
         logo_label = QLabel()
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
-            logo_label.setPixmap(logo_pixmap.scaledToWidth(100, Qt.SmoothTransformation))
+            logo_label.setPixmap(logo_pixmap.scaledToWidth(
+                100, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignLeft)
         layout.addWidget(logo_label)
 
-        layout.addItem(QSpacerItem(0, 60, QSizePolicy.Minimum, QSizePolicy.Fixed))
-
-        # --- Load theme JSON ---
-        theme_data = theme_manager.get_theme_data()
-        self.version = theme_data["theme"]["version"]
+        layout.addItem(QSpacerItem(
+            0, 60, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
         # --- Navigation buttons ---
         self.buttons: dict[str, NavButton] = {}
@@ -106,7 +116,8 @@ class SidePanel(QWidget):
         for key, text, icon_file in pages:
             icon_path = project_root / "assets" / "icon" / icon_file
             nav_btn = NavButton(key, text, icon_path, theme_data)
-            nav_btn.btn.clicked.connect(lambda checked, k=key: self.page_selected.emit(k))
+            nav_btn.btn.clicked.connect(
+                lambda checked, k=key: self.page_selected.emit(k))
 
             layout.addWidget(nav_btn.widget())
             self.buttons[key] = nav_btn
@@ -118,7 +129,8 @@ class SidePanel(QWidget):
         user_icon_label = QLabel()
         if user_icon_path.exists():
             user_icon_label.setPixmap(
-                load_svg_colored(user_icon_path, theme_data["color"]["text"]["primary"], 24).pixmap(24, 24)
+                load_svg_colored(
+                    user_icon_path, theme_data["color"]["text"]["primary"], 24).pixmap(24, 24)
             )
         user_icon_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(user_icon_label)

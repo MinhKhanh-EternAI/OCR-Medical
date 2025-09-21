@@ -1,11 +1,12 @@
 {
   "last_screen": 1,
   "geometry": [
-    -1807,
-    103,
-    1217,
-    648
+    -1920,
+    23,
+    1536,
+    793
   ],
-  "is_maximized": false,
-  "is_fullscreen": false
+  "is_maximized": true,
+  "is_fullscreen": false,
+  "theme": "light"
 }
