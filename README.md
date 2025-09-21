@@ -20,20 +20,31 @@
 
 ```bash
 OCR_Medical/
-│   main.py              # file chạy chính
-│   requirements.txt     # thư viện cần thiết
-│   app_config.json      # cấu hình app
-│   watch.py             # auto reload khi dev
+│   .gitignore
+│   README.md
 │
-├── assets/              # font, icon, logo
-├── core/                # xử lý OCR, pipeline, tiền xử lý ảnh
-├── data/                # dữ liệu mẫu + output
-├── tests/               # unit test
-├── ui/                  # giao diện (PySide6)
-│   ├── pages/           # Home, File Log, Extract, Review, Setting
-│   ├── style/           # theme, QSS
-│   └── widgets/         # custom widget
-└── utils/               # tiện ích (logger, helpers)
+├───ocr_medical/
+│   │   main.py
+│   │   requirements.txt
+│   │   watch.py
+│   │   README.md
+│   │
+│   ├───assets/              # fonts, icon, logo
+│   ├───config/              # app_config.json
+│   ├───core/                # OCR pipeline & xử lý ảnh
+│   ├───data/
+│   │   ├───samples/         # ảnh đầu vào mẫu
+│   │   └───output/          # ảnh đã xử lý + text
+│   ├───tests/               # unit tests
+│   ├───ui/
+│   │   ├───pages/           # các trang (home, log, extract, review, setting)
+│   │   ├───style/           # theme, QSS
+│   │   └───widgets/         # custom widgets
+│   └───utils/               # helpers, logger
+│
+└───Requirement/
+        Kickoff N6-BData.pdf
+
 ```
 
 ---

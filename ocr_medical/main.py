@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication
 from ui.main_window import MainWindow
 
 # File lưu cấu hình app (màn hình, kích thước, trạng thái, theme, ...)
-CONFIG_FILE = Path(__file__).resolve().parent / "app_config.json"
+CONFIG_FILE = Path(__file__).resolve().parent / "config" / "app_config.json"
 
 
 def load_config() -> dict:
