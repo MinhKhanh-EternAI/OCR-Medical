@@ -29,10 +29,14 @@ def main() -> int:
     app = QApplication(sys.argv)
 
     project_root = Path(__file__).resolve().parent
-    win = MainWindow(project_root=project_root)
+    config = load_config()
+
+    # --- Lấy theme từ config ---
+    theme_name = config.get("theme", "light")
+
+    win = MainWindow(project_root=project_root, theme_name=theme_name)
 
     screens = QGuiApplication.screens()
-    config = load_config()
 
     # --- Khôi phục màn hình và trạng thái ---
     target_index = config.get("last_screen", 0)
@@ -78,6 +82,9 @@ def main() -> int:
             ],
             "is_maximized": win.isMaximized(),
             "is_fullscreen": win.isFullScreen(),
+
+            # 🔹 Lưu theme hiện tại
+            "theme": win.theme_manager.get_theme_name()
         }
         save_config(data)
 
