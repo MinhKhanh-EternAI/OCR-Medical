@@ -1,0 +1,45 @@
+{
+  "theme": {
+    "name": "light",
+    "version": "1.0.0",
+    "author": "Minh Khanh",
+    "description": "A light theme for the medical OCR application."
+  },
+  "color": {
+    "background": {
+      "base": "#F6F8FB",
+      "panel": "#FFFFFF",
+      "drag_area": "#ECF2FE"
+    },
+    "text": {
+      "primary": "#1C1C1C",
+      "secondary": "#175CD3",
+      "muted": "#ADB5BD",
+      "placeholder": "#CED4DA"
+    },
+    "border": {
+      "default": "#ECE9E9",
+      "focus": "#4A90E2",
+      "drag_area": "#A0C4FF"
+    },
+    "state": {
+      "primary": {
+        "hover": "#357ABD",
+        "active": "#2C5AA0"
+      },
+      "secondary": {
+        "hover": "#F7F4F4",
+        "active": "#ECF2FE" 
+      }
+    }
+  },
+  "typography": {
+    "family": "Inter",
+    "heading1": { "size": 25, "weight": 800 },
+    "heading2": { "size": 16, "weight": 800 },
+    "normal":   { "size": 14, "weight": 400 },
+    "secondary":{ "size": 16, "weight": 800 },
+    "muted":    { "size": 12, "weight": 400 },
+    "placeholder": { "size": 14, "weight": 400 }
+  }
+}
