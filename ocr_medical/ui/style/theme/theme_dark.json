@@ -1,0 +1,22 @@
+{
+  "font": {
+    "family": "Inter",
+    "heading2": { "size": 20, "weight": "600", "color": "#ECF0F1" },
+    "normal": { "size": 14, "weight": "400", "color": "#ECF0F1" },
+    "secondary": { "size": 14, "weight": "400", "color": "#95A5A6" },
+    "muted": { "size": 12, "weight": "400", "color": "#7F8C8D" }
+  },
+  "color": {
+    "primary": "#00A8FF",
+    "primary_hover": "#007ACC",
+    "background": "#1E272E",
+    "background_panel": "#2C3A47",
+    "border": "#3C4A57",
+    "text_primary": "#ECF0F1",
+    "text_secondary": "#95A5A6",
+    "text_muted": "#7F8C8D"
+  },
+  "layout": {
+    "padding": 16
+  }
+}
