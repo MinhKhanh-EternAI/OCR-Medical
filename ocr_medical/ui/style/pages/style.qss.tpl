@@ -23,10 +23,6 @@
 /*   3. Side Panel    */
 /* ****************** */
 
-#SidePanel {
-    background: #000;
-}
-
 /* 3.1 Navigation Buttons */
 QPushButton[nav="true"] {
     text-align: left;

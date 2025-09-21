@@ -32,13 +32,13 @@ class Panel(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, theme_name: str = "light") -> None:
         super().__init__()
         self.project_root = project_root
         self.setWindowTitle("OCR-Medical")
 
         # --- Theme Manager ---
-        self.theme_manager = ThemeManager("light")
+        self.theme_manager = ThemeManager(theme_name)
         self.theme_manager.theme_changed.connect(self.apply_theme)
 
         # Central container
