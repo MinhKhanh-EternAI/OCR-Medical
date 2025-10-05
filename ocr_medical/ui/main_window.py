@@ -1,18 +1,19 @@
 from __future__ import annotations
 from pathlib import Path
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QGridLayout, QStackedWidget, QFrame
-)
-from .widgets.side_panel import SidePanel
-from .pages.home_page import HomePage
-from .pages.setting_page import SettingPage
-from .pages.file_log_page import FileLogPage
-from .pages.extract_info_page import ExtraInfoPage
-from .pages.review_page import ReviewPage
-from .style.theme_manager import ThemeManager
-from .style.style_loader import load_theme_qss
+from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QStackedWidget, QFrame
 
+from ocr_medical.ui.widgets.side_panel import SidePanel
+from ocr_medical.ui.pages.home_page import HomePage
+from ocr_medical.ui.pages.setting_page import SettingPage
+from ocr_medical.ui.pages.file_log_page import FileLogPage
+from ocr_medical.ui.pages.extract_info_page import ExtraInfoPage
+from ocr_medical.ui.pages.review_page import ReviewPage
+from ocr_medical.ui.style.theme_manager import ThemeManager
+from ocr_medical.ui.style.style_loader import load_theme_qss
+
+
+# ---------- Layout constants ----------
 MARGIN = 24
 GUTTER = 24
 SIDE_COLS = 2
@@ -21,8 +22,9 @@ MAIN_COLS = TOTAL_COLS - SIDE_COLS
 TOTAL_ROWS = 12
 
 
+# ---------- Panel wrapper ----------
 class Panel(QFrame):
-    """Khung panel có border/background đồng nhất theo theme."""
+    """Khung panel có border / nền đồng nhất theo theme."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -31,64 +33,73 @@ class Panel(QFrame):
         self.setFrameShadow(QFrame.Raised)
 
 
+# ---------- Main Window ----------
 class MainWindow(QMainWindow):
     def __init__(self, project_root: Path, theme_name: str = "light") -> None:
         super().__init__()
         self.project_root = project_root
         self.setWindowTitle("OCR-Medical")
 
-        # --- Theme Manager ---
+        # --- Theme manager ---
         self.theme_manager = ThemeManager(theme_name)
         self.theme_manager.theme_changed.connect(self.apply_theme)
 
-        # Central container
+        # --- Central container ---
         root = QWidget(self)
         self.setObjectName("MainWindow")
         self.setCentralWidget(root)
+
         grid = QGridLayout(root)
         grid.setContentsMargins(MARGIN, MARGIN, MARGIN, MARGIN)
         grid.setHorizontalSpacing(GUTTER)
         grid.setVerticalSpacing(GUTTER)
 
-        # Thiết lập 12 cột / 12 hàng theo tỉ lệ đều
+        # Chia layout 12 cột / 12 hàng
         for c in range(TOTAL_COLS):
             grid.setColumnStretch(c, 1)
         for r in range(TOTAL_ROWS):
             grid.setRowStretch(r, 1)
 
-        # --- Side Panel ---
+        # ---------- Side Panel ----------
         self.side_panel = SidePanel(
             project_root=self.project_root,
             theme_manager=self.theme_manager
         )
         side_wrapper = Panel()
-        side_layout = QGridLayout(side_wrapper)
+        from PySide6.QtWidgets import QGridLayout as QGL
+        side_layout = QGL(side_wrapper)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.addWidget(self.side_panel, 0, 0, 1, 1)
 
-        # --- Main Stack (các page) ---
+        # ---------- Main Stack ----------
         self.stack = QStackedWidget()
         main_wrapper = Panel()
-        main_layout = QGridLayout(main_wrapper)
+        main_layout = QGL(main_wrapper)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.stack, 0, 0, 1, 1)
 
-        # Thêm vào grid 12x12
+        # Thêm vào grid
         grid.addWidget(side_wrapper, 0, 0, TOTAL_ROWS, SIDE_COLS)
         grid.addWidget(main_wrapper, 0, SIDE_COLS, TOTAL_ROWS, MAIN_COLS)
 
-        # Đăng ký các trang (truyền theme_manager vào từng page)
+        # ---------- Pages ----------
         self.page_index: dict[str, int] = {}
-        self._add_page("home", HomePage(self.theme_manager))
+
+        # Trang Home (có phát signal khi nhấn Process)
+        home_page = HomePage(self.theme_manager)
+        home_page.process_requested.connect(self._go_to_extract_info)
+        self._add_page("home", home_page)
+
+        # Các trang còn lại
         self._add_page("setting", SettingPage(self.theme_manager))
         self._add_page("file_log", FileLogPage(self.theme_manager))
         self._add_page("extra_info", ExtraInfoPage(self.theme_manager))
         self._add_page("review", ReviewPage(self.theme_manager))
 
-        # Bắt sự kiện nav
+        # Bắt sự kiện điều hướng từ side panel
         self.side_panel.page_selected.connect(self.navigate_to)
 
-        # Mặc định vào Home
+        # Trang mặc định
         self.navigate_to("home")
 
         # Áp style global lần đầu
@@ -97,15 +108,31 @@ class MainWindow(QMainWindow):
             self.theme_manager.get_theme_name()
         )
 
+    # ------------------------------------------------------
     def _add_page(self, key: str, widget: QWidget) -> None:
+        """Thêm 1 trang vào stack widget."""
         idx = self.stack.addWidget(widget)
         self.page_index[key] = idx
 
+    # ------------------------------------------------------
     def navigate_to(self, key: str) -> None:
+        """Chuyển sang trang theo key."""
         if key in self.page_index:
             self.stack.setCurrentIndex(self.page_index[key])
             self.side_panel.set_active(key)
 
+    # ------------------------------------------------------
+    def _go_to_extract_info(self, files: list[Path]):
+        """Khi nhấn Process Document ở Home."""
+        self.navigate_to("extra_info")
+
+        # Lấy trang Extract Info
+        page = self.stack.widget(self.page_index["extra_info"])
+        if hasattr(page, "load_files"):
+            page.load_files(files)
+
+    # ------------------------------------------------------
     def apply_theme(self, theme_data: dict, theme_name: str) -> None:
-        qss = load_theme_qss(theme_name)   # global style
+        """Áp dụng theme toàn app."""
+        qss = load_theme_qss(theme_name)
         self.setStyleSheet(qss)

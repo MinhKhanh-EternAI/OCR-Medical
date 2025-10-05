@@ -68,3 +68,9 @@ QPushButton[nav="true"]:checked {
     color: {{ color.text.primary }};
 }
 
+#Divider {
+    background: {{ color.border.default }};
+    border: none;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}

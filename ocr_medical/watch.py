@@ -6,15 +6,17 @@ from threading import Timer
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+# --------- Cấu hình ----------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 UI_DIR = PROJECT_ROOT / "ocr_medical" / "ui"
-MAIN_FILE = PROJECT_ROOT / "ocr_medical" / "main.py"
+MAIN_MODULE = "ocr_medical.main"     # ✅ chạy app theo dạng module để tránh lỗi import
+DEBOUNCE_DELAY = 1.0                 # giây chờ sau lần thay đổi cuối cùng
 
 process = None      # tiến trình app hiện tại
 reload_timer = None # timer debounce
-DEBOUNCE_DELAY = 1.0  # giây chờ sau lần thay đổi cuối cùng
 
 
+# --------- Watchdog Handler ----------
 class ReloadHandler(FileSystemEventHandler):
     def on_modified(self, event):
         global reload_timer
@@ -23,50 +25,53 @@ class ReloadHandler(FileSystemEventHandler):
             return
 
         path = Path(event.src_path)
-        if str(UI_DIR) in str(path) or path.samefile(MAIN_FILE):
-            print(f"📂 Change detected: {path}")
+        if str(UI_DIR) in str(path) or path.suffix in (".py", ".qss"):
+            print(f"📂 Change detected: {path.name}")
 
-            # Hủy timer cũ (nếu có) và tạo timer mới
+            # Huỷ timer cũ và tạo timer mới (debounce)
             if reload_timer:
                 reload_timer.cancel()
             reload_timer = Timer(DEBOUNCE_DELAY, restart_app)
             reload_timer.start()
 
 
+# --------- App Control ----------
 def start_app():
-    """Mở app mới"""
+    """Chạy app theo module (-m ocr_medical.main)."""
     global process
     if process:
         process.kill()
+
     print("🚀 Starting app...")
-    process = subprocess.Popen([sys.executable, str(MAIN_FILE)])
+    # ✅ dùng -m để Python hiểu ocr_medical là package
+    process = subprocess.Popen([sys.executable, "-m", MAIN_MODULE])
     return process
 
 
 def restart_app():
-    """Kill app cũ và mở app mới"""
+    """Kill app cũ và mở lại."""
     global process
     if process:
-        print("💀 Killing old app...")
+        print("💀 Restarting app...")
         process.kill()
         process.wait()
     start_app()
 
 
+# --------- Main Entry ----------
 if __name__ == "__main__":
+    print("👀 Watch mode started.")
+    print(f"📁 Watching directory: {UI_DIR}")
+
     # Khởi động lần đầu
     start_app()
 
-    # Watchdog
+    # Thiết lập Watchdog
     event_handler = ReloadHandler()
     observer = Observer()
-
     observer.schedule(event_handler, str(UI_DIR), recursive=True)
-    observer.schedule(event_handler, str(MAIN_FILE.parent), recursive=False)
-
+    observer.schedule(event_handler, str(PROJECT_ROOT / "ocr_medical"), recursive=False)
     observer.start()
-    print(f"👀 Watching UI dir: {UI_DIR}")
-    print(f"👀 Watching main file: {MAIN_FILE}")
 
     try:
         while True:

@@ -15,17 +15,19 @@
       "primary": "#1C1C1C",
       "secondary": "#175CD3",
       "muted": "#ADB5BD",
-      "placeholder": "#CED4DA"
+      "placeholder": "#777777"
     },
     "border": {
       "default": "#ECE9E9",
+      "search_bar": "#777777",
       "focus": "#4A90E2",
       "drag_area": "#A0C4FF"
     },
     "state": {
       "primary": {
         "hover": "#357ABD",
-        "active": "#2C5AA0"
+        "active": "#2C5AA0",
+        "focus": "#8B8B8B"
       },
       "secondary": {
         "hover": "#F7F4F4",
@@ -40,6 +42,6 @@
     "normal":   { "size": 14, "weight": 400 },
     "secondary":{ "size": 16, "weight": 800 },
     "muted":    { "size": 12, "weight": 400 },
-    "placeholder": { "size": 14, "weight": 400 }
+    "placeholder": { "size": 14, "weight": 500 }
   }
 }
