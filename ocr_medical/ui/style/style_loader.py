@@ -11,7 +11,6 @@ THEME_DIR = STYLE_DIR / "theme"
 PAGES_DIR = STYLE_DIR / "pages"
 
 
-
 def load_theme_qss(theme: str = "light", page: str | None = None) -> str:
     """Render QSS từ template + theme JSON."""
     theme_file = THEME_DIR / f"theme_{theme}.json"

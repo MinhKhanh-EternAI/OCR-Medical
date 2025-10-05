@@ -2,17 +2,10 @@ from __future__ import annotations
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (
-    QLabel,
-    QVBoxLayout,
-    QWidget,
-    QSizePolicy,
-    QSpacerItem,
-    QPushButton,
-)
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QSizePolicy, QSpacerItem, QPushButton
 
-from ui.style.style_loader import load_svg_colored
-from ui.style.theme_manager import ThemeManager
+from ocr_medical.ui.style.style_loader import load_svg_colored
+from ocr_medical.ui.style.theme_manager import ThemeManager
 
 
 class NavButton(QWidget):

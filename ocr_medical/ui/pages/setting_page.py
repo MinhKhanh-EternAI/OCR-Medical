@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QVBoxLayout, QLabel, QComboBox
-from .base_page import BasePage
-from ui.style.theme_manager import ThemeManager
+from ocr_medical.ui.pages.base_page import BasePage
+from ocr_medical.ui.style.theme_manager import ThemeManager
 
 
 class SettingPage(BasePage):
@@ -17,3 +17,6 @@ class SettingPage(BasePage):
         combo.setCurrentText(theme_manager.get_theme_name())
         combo.currentTextChanged.connect(theme_manager.set_theme)
         layout.addWidget(combo)
+
+        # Nằm chân trang
+        layout.addStretch(1)
