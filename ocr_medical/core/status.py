@@ -6,15 +6,18 @@ class StatusManager:
     """
     def __init__(self):
         self.messages: List[str] = []
+        self.logs: List[str] = []
         self.state: str = ""
 
     def add(self, msg: str):
-        print(msg)  # debug console
+        print(msg)
         self.messages.append(msg)
+        self.logs.append(msg)
         self.state = msg
 
     def reset(self):
         self.messages.clear()
+        self.logs.clear()
         self.state = ""
 
 # Singleton

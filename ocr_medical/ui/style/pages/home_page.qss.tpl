@@ -1,23 +1,5 @@
-/* ****************** */
-/*   Home Page CSS    */
-/* ****************** */
+/* Home Page CSS */
 
-#SearchBar {
-    padding: 6px 10px;
-    border: 1px solid {{ color.border.default }};
-    border-radius: 10px;
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.primary }};
-    background: {{ color.background.panel }};
-}
-
-#SearchBar:focus {
-    border: 1px solid {{ color.state.primary.focus }};
-    outline: none;
-}
-
-
-/* --- Nút chức năng --- */
 #ActionButton {
     padding: 6px 10px;
     border: 1px solid {{ color.border.default }};
@@ -39,15 +21,16 @@
     margin-top: 24px;
 }
 
+#UploadBox_Dragging {
+    border: 2px solid {{ color.text.secondary }};
+    background: rgba(23, 92, 211, 0.1);
+}
+
 #UploadText {
     margin-top: 12px;
     font-size: {{ typography.normal.size }}px;
     color: {{ color.text.primary }};
 }
-
-/* ****************** */
-/*  Storage Directory */
-/* ****************** */
 
 #StorageFrame {
     margin-top: 16px;
@@ -95,7 +78,7 @@
 }
 
 #ProcessButton {
-    background: {{ color.text.secondary }}; /* dùng màu xanh trong theme */
+    background: {{ color.text.secondary }};
     color: #ffffff;
     border: none;
     border-radius: 6px;
@@ -112,12 +95,6 @@
     background: {{ color.state.primary.active }};
 }
 
-/* ****************** */
-/*   File List Row    */
-/* ****************** */
-
-
-
 #FileName {
     font-size: {{ typography.normal.size }}px;
     color: {{ color.text.primary }};
@@ -127,7 +104,6 @@
     font-size: 13px;
     color: #666;
 }
-
 
 #DeleteButton {
     border: 1px solid transparent;
@@ -139,6 +115,7 @@
     border: 1px solid transparent;
     border-radius: 6px;
 }
+
 #FileList {
     border: none;
     background: {{ color.background.panel }};
