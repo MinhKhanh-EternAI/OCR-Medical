@@ -59,3 +59,46 @@
 #ViewButton:hover {
     background: {{ color.state.secondary.hover }};
 }
+
+#InfoFrame {
+    border: 1px solid {{ color.border.default }};
+    border-radius: 8px;
+    padding: 12px;
+    background: {{ color.background.panel }};
+}
+
+#InfoTitle {
+    font-size: {{ typography.heading2.size }}px;
+    font-weight: {{ typography.heading2.weight }};
+    color: {{ color.text.primary }};
+}
+
+#FilesList {
+    border: 1px solid {{ color.border.default }};
+    border-radius: 6px;
+    background: {{ color.background.base }};
+}
+
+#DeleteBtn {
+    background: #F44336;
+    color: #ffffff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+#DeleteBtn:hover {
+    background: #D32F2F;
+}
+
+#InfoTabs {
+    background: {{ color.background.panel }};
+}
+
+#ExtractedInfoBox, #RawInfoBox {
+    border: 1px solid {{ color.border.default }};
+    border-radius: 6px;
+    padding: 10px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+}
