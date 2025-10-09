@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         # ---------- Pages ----------
         self.page_index: dict[str, int] = {}
 
-        # Trang Home (có phát signal khi nhấn Process)
+        # Trang Home
         home_page = HomePage(self.theme_manager)
         home_page.process_requested.connect(self._go_to_extract_info)
         self._add_page("home", home_page)
@@ -93,7 +93,12 @@ class MainWindow(QMainWindow):
         # Các trang còn lại
         self._add_page("setting", SettingPage(self.theme_manager))
         self._add_page("file_log", FileLogPage(self.theme_manager))
-        self._add_page("extra_info", ExtraInfoPage(self.theme_manager))
+        
+        # 📌 THÊM: Connect signal navigate_back từ ExtraInfoPage
+        extract_page = ExtraInfoPage(self.theme_manager)
+        extract_page.navigate_back_requested.connect(lambda: self.navigate_to("home"))
+        self._add_page("extra_info", extract_page)
+        
         self._add_page("review", ReviewPage(self.theme_manager))
 
         # Bắt sự kiện điều hướng từ side panel
