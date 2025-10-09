@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
                                 QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
                                 QMessageBox, QFrame)
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor
 from pathlib import Path
 import json
 from datetime import datetime
@@ -120,7 +120,7 @@ class FileLogPage(BasePage):
             self.table.setItem(row, 2, QTableWidgetItem(time_str))
             
             status_item = QTableWidgetItem(status)
-            status_item.setForeground(status_color)
+            status_item.setForeground(QColor(status_color))
             self.table.setItem(row, 3, status_item)
             
             view_btn = QPushButton("View")

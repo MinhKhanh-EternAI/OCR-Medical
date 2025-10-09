@@ -13,7 +13,6 @@ from ocr_medical.ui.style.theme_manager import ThemeManager
 from ocr_medical.ui.style.style_loader import load_theme_qss
 
 
-# ---------- Layout constants ----------
 MARGIN = 24
 GUTTER = 24
 SIDE_COLS = 2
@@ -22,7 +21,6 @@ MAIN_COLS = TOTAL_COLS - SIDE_COLS
 TOTAL_ROWS = 12
 
 
-# ---------- Panel wrapper ----------
 class Panel(QFrame):
     """Khung panel có border / nền đồng nhất theo theme."""
 
@@ -33,18 +31,15 @@ class Panel(QFrame):
         self.setFrameShadow(QFrame.Raised)
 
 
-# ---------- Main Window ----------
 class MainWindow(QMainWindow):
     def __init__(self, project_root: Path, theme_name: str = "light") -> None:
         super().__init__()
         self.project_root = project_root
         self.setWindowTitle("OCR-Medical")
 
-        # --- Theme manager ---
         self.theme_manager = ThemeManager(theme_name)
         self.theme_manager.theme_changed.connect(self.apply_theme)
 
-        # --- Central container ---
         root = QWidget(self)
         self.setObjectName("MainWindow")
         self.setCentralWidget(root)
@@ -54,13 +49,11 @@ class MainWindow(QMainWindow):
         grid.setHorizontalSpacing(GUTTER)
         grid.setVerticalSpacing(GUTTER)
 
-        # Chia layout 12 cột / 12 hàng
         for c in range(TOTAL_COLS):
             grid.setColumnStretch(c, 1)
         for r in range(TOTAL_ROWS):
             grid.setRowStretch(r, 1)
 
-        # ---------- Side Panel ----------
         self.side_panel = SidePanel(
             project_root=self.project_root,
             theme_manager=self.theme_manager
@@ -71,73 +64,55 @@ class MainWindow(QMainWindow):
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.addWidget(self.side_panel, 0, 0, 1, 1)
 
-        # ---------- Main Stack ----------
         self.stack = QStackedWidget()
         main_wrapper = Panel()
         main_layout = QGL(main_wrapper)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.stack, 0, 0, 1, 1)
 
-        # Thêm vào grid
         grid.addWidget(side_wrapper, 0, 0, TOTAL_ROWS, SIDE_COLS)
         grid.addWidget(main_wrapper, 0, SIDE_COLS, TOTAL_ROWS, MAIN_COLS)
 
-        # ---------- Pages ----------
         self.page_index: dict[str, int] = {}
 
-        # Trang Home
         home_page = HomePage(self.theme_manager)
         home_page.process_requested.connect(self._go_to_extract_info)
         self._add_page("home", home_page)
 
-        # Các trang còn lại
         self._add_page("setting", SettingPage(self.theme_manager))
         self._add_page("file_log", FileLogPage(self.theme_manager))
         
-        # 📌 THÊM: Connect signal navigate_back từ ExtraInfoPage
         extract_page = ExtraInfoPage(self.theme_manager)
         extract_page.navigate_back_requested.connect(lambda: self.navigate_to("home"))
         self._add_page("extra_info", extract_page)
         
         self._add_page("review", ReviewPage(self.theme_manager))
 
-        # Bắt sự kiện điều hướng từ side panel
         self.side_panel.page_selected.connect(self.navigate_to)
 
-        # Trang mặc định
         self.navigate_to("home")
 
-        # Áp style global lần đầu
         self.apply_theme(
             self.theme_manager.get_theme_data(),
             self.theme_manager.get_theme_name()
         )
 
-    # ------------------------------------------------------
     def _add_page(self, key: str, widget: QWidget) -> None:
-        """Thêm 1 trang vào stack widget."""
         idx = self.stack.addWidget(widget)
         self.page_index[key] = idx
 
-    # ------------------------------------------------------
     def navigate_to(self, key: str) -> None:
-        """Chuyển sang trang theo key."""
         if key in self.page_index:
             self.stack.setCurrentIndex(self.page_index[key])
             self.side_panel.set_active(key)
 
-    # ------------------------------------------------------
     def _go_to_extract_info(self, files: list[Path]):
-        """Khi nhấn Process Document ở Home."""
         self.navigate_to("extra_info")
 
-        # Lấy trang Extract Info
         page = self.stack.widget(self.page_index["extra_info"])
         if hasattr(page, "load_files"):
             page.load_files(files)
 
-    # ------------------------------------------------------
     def apply_theme(self, theme_data: dict, theme_name: str) -> None:
-        """Áp dụng theme toàn app."""
         qss = load_theme_qss(theme_name)
         self.setStyleSheet(qss)
