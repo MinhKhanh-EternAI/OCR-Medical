@@ -1,400 +1,184 @@
 /* ============================================ */
-/*         Extract Info Page - Enhanced        */
+/*         Extract Info Page - Compact          */
 /* ============================================ */
 
-/* Section Headers */
+/* Section Headers (giảm khoảng cách) */
 #SectionLabel {
     font-size: {{ typography.heading2.size }}px;
     font-weight: {{ typography.heading2.weight }};
     color: {{ color.text.primary }};
-    padding: 8px 0;
-    margin-bottom: 8px;
+    padding: 2px 0;
+    margin: 0 0 4px 0;
 }
 
-/* Left & Right Panels */
+/* Panels (giảm padding để sát hơn) */
 #LeftPanel, #RightPanel {
     background: {{ color.background.panel }};
-    border-radius: 12px;
-    padding: 16px;
-}
-
-/* Main Splitter */
-#MainSplitter {
-    background: transparent;
-}
-
-#MainSplitter::handle {
-    background: transparent;
-    width: 12px;
-}
-
-/* ============================================ */
-/*           Image Viewer                      */
-/* ============================================ */
-
-#ImageViewer {
-    border: 2px solid {{ color.border.default }};
-    border-radius: 12px;
-    background: #2a2a2a;
-    padding: 4px;
-}
-
-#IconButton {
-    background: {{ color.background.panel }};
-    border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    padding: 6px;
-}
-
-#IconButton:hover {
-    background: {{ color.state.secondary.hover }};
-    border: 1px solid {{ color.state.primary.hover }};
-}
-
-#IconButton:pressed {
-    background: {{ color.state.secondary.active }};
-}
-
-/* ============================================ */
-/*         Processing Files List               */
-/* ============================================ */
-
-#ProcessingFilesList {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 10px;
-    background: {{ color.background.base }};
-    padding: 4px;
-}
-
-#ProcessingFilesList QScrollBar:vertical {
-    border: none;
-    background: {{ color.background.base }};
-    width: 10px;
-    border-radius: 5px;
-}
-
-#ProcessingFilesList QScrollBar::handle:vertical {
-    background: {{ color.border.default }};
-    border-radius: 5px;
-    min-height: 20px;
-}
-
-#ProcessingFilesList QScrollBar::handle:vertical:hover {
-    background: {{ color.text.muted }};
-}
-
-#ProcessingFileItem {
-    background: {{ color.background.panel }};
-    border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    margin: 2px 0;
-}
-
-#ProcessingFileItem:hover {
-    background: {{ color.state.secondary.hover }};
-    border: 1px solid {{ color.state.primary.hover }};
-}
-
-#ProcessingFileName {
-    font-size: {{ typography.normal.size }}px;
-    font-weight: 500;
-    color: {{ color.text.primary }};
-}
-
-#ProcessingFileStatus {
-    font-size: {{ typography.normal.size }}px;
-    font-weight: 700;
-    padding: 4px 12px;
-    border-radius: 6px;
-}
-
-/* ============================================ */
-/*         Result Display Tabs                 */
-/* ============================================ */
-
-#ResultTabs {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 10px;
-    background: {{ color.background.panel }};
-}
-
-#ResultTabs::pane {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 10px;
-    background: {{ color.background.panel }};
+    border-radius: 14px;
     padding: 12px;
 }
 
-#ResultTabs::tab-bar {
-    alignment: left;
-    background: transparent;
-}
+/* ============================================ */
+/*        File Preview (spinner + fullscreen)   */
+/* ============================================ */
 
-#ResultTabs QTabBar::tab {
+#PreviewContainer {
+    border: 2px dashed {{ color.border.default }};
+    border-radius: 14px;
     background: {{ color.background.base }};
-    color: {{ color.text.muted }};
+    min-height: 360px;
+    position: relative;
+}
+
+#FullscreenOverlay {
+    background: rgba(0,0,0,0.35);
     border: 1px solid {{ color.border.default }};
-    border-bottom: none;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    padding: 10px 20px;
-    margin-right: 4px;
+    border-radius: 10px;
+    padding: 6px;
+}
+#FullscreenOverlay:hover {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid {{ color.state.primary.hover }};
+}
+#FullscreenOverlay:pressed { background: rgba(0,0,0,0.65); }
+
+/* Spinner + label */
+#SpinnerLabel {
+    color: {{ color.text.muted }};
     font-size: {{ typography.normal.size }}px;
-    font-weight: 600;
 }
-
-#ResultTabs QTabBar::tab:selected {
-    background: {{ color.background.panel }};
-    color: {{ color.text.secondary }};
-    border-color: {{ color.border.default }};
-}
-
-#ResultTabs QTabBar::tab:hover:!selected {
-    background: {{ color.state.secondary.hover }};
+#ReadyHint {
+    color: {{ color.text.muted }};
+    font-size: {{ typography.normal.size }}px;
 }
 
 /* ============================================ */
-/*         Markdown Preview & Raw              */
+/*         Result Display Tabs (style ảnh 2)    */
 /* ============================================ */
 
-#MarkdownPreview {
+#ResultTabs {
+    background: transparent;
     border: none;
-    border-radius: 8px;
-    padding: 16px;
+}
+#ResultTabs::pane {
+    background: {{ color.background.base }};
+    border: 1px solid {{ color.border.default }};
+    border-radius: 16px;
+    padding: 0;
+    margin-top: 8px;
+}
+
+/* Tab (giống ảnh 2) */
+#ResultTabs QTabBar::tab {
+    background: transparent;
+    color: {{ color.text.muted }};
+    border: none;
+    padding: 12px 22px;
+    margin: 0 8px 0 0;
+    font-size: {{ typography.heading3.size }}px;
+    font-weight: 700;
+}
+#ResultTabs QTabBar::tab:selected {
+    color: {{ color.state.primary.hover }};
+    border-bottom: 2px solid {{ color.state.primary.hover }};
+}
+
+/* Nội dung vùng hiển thị (viền bo + nền sáng) */
+#MarkdownPreview, #MarkdownRaw {
+    border: none;
+    border-radius: 16px;
+    padding: 18px;
     font-size: {{ typography.normal.size }}px;
     color: {{ color.text.primary }};
     background: {{ color.background.base }};
     line-height: 1.6;
 }
 
+/* Raw dùng mono font */
 #MarkdownRaw {
-    border: none;
-    border-radius: 8px;
-    padding: 16px;
     font-size: 13px;
-    color: {{ color.text.primary }};
-    background: {{ color.background.base }};
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    line-height: 1.5;
+    font-family: 'Consolas','Monaco','Courier New',monospace;
 }
 
-#MarkdownRaw:focus, #MarkdownPreview:focus {
-    border: 1px solid {{ color.state.primary.focus }};
-    outline: none;
-}
-
-/* Custom scrollbar cho text editors */
+/* Scrollbars */
 #MarkdownPreview QScrollBar:vertical,
 #MarkdownRaw QScrollBar:vertical {
-    border: none;
-    background: {{ color.background.base }};
-    width: 12px;
-    border-radius: 6px;
+    border: none; background: {{ color.background.base }};
+    width: 12px; border-radius: 6px;
 }
-
 #MarkdownPreview QScrollBar::handle:vertical,
 #MarkdownRaw QScrollBar::handle:vertical {
     background: {{ color.border.default }};
-    border-radius: 6px;
-    min-height: 30px;
+    border-radius: 6px; min-height: 30px;
 }
-
 #MarkdownPreview QScrollBar::handle:vertical:hover,
 #MarkdownRaw QScrollBar::handle:vertical:hover {
     background: {{ color.text.muted }};
 }
 
 /* ============================================ */
-/*         Status & Progress Bar               */
+/*         Progress + Buttons + Status          */
 /* ============================================ */
-
-#StatusLabel {
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.primary }};
-    font-weight: 600;
-    padding: 8px 12px;
-    background: {{ color.background.panel }};
-    border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    margin-top: 4px;
-}
 
 #ProcessProgress {
     border: 1px solid {{ color.border.default }};
     border-radius: 10px;
     background: {{ color.background.base }};
-    height: 28px;
+    height: 26px;
     text-align: center;
+    margin-top: 6px;
 }
-
 #ProcessProgress::chunk {
     background: qlineargradient(
-        x1: 0, y1: 0, x2: 1, y2: 0,
-        stop: 0 {{ color.text.secondary }},
-        stop: 1 {{ color.state.primary.hover }}
+        x1:0,y1:0,x2:1,y2:0,
+        stop:0 {{ color.text.secondary }},
+        stop:1 {{ color.state.primary.hover }}
     );
     border-radius: 9px;
 }
 
-#ProcessProgress:chunk:hover {
-    background: {{ color.state.primary.active }};
-}
-
-/* ============================================ */
-/*         Action Buttons                      */
-/* ============================================ */
-
+/* Buttons */
 #BackButton {
     background: {{ color.background.panel }};
     color: {{ color.text.primary }};
     border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    padding: 10px 20px;
-    font-size: {{ typography.normal.size }}px;
-    font-weight: 600;
+    border-radius: 8px; padding: 8px 16px;
+    font-size: {{ typography.normal.size }}px; font-weight: 600;
 }
-
-#BackButton:hover {
-    background: {{ color.state.secondary.hover }};
-    border: 1px solid {{ color.state.primary.hover }};
-}
-
-#BackButton:pressed {
-    background: {{ color.state.secondary.active }};
-}
+#BackButton:hover { background: {{ color.state.secondary.hover }}; border: 1px solid {{ color.state.primary.hover }}; }
+#BackButton:pressed { background: {{ color.state.secondary.active }}; }
 
 #CancelButton {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #F44336,
-        stop: 1 #D32F2F
-    );
-    color: #ffffff;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 20px;
-    font-size: {{ typography.normal.size }}px;
-    font-weight: 700;
+    background: qlineargradient( x1:0,y1:0,x2:0,y2:1, stop:0 #F44336, stop:1 #D32F2F );
+    color: #fff; border: none; border-radius: 8px; padding: 8px 16px;
+    font-size: {{ typography.normal.size }}px; font-weight: 700;
 }
-
-#CancelButton:hover {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 #E53935,
-        stop: 1 #C62828
-    );
-}
-
-#CancelButton:pressed {
-    background: #B71C1C;
-}
-
-#CancelButton:disabled {
-    background: #cccccc;
-    color: #999999;
-}
+#CancelButton:hover { background: qlineargradient( x1:0,y1:0,x2:0,y2:1, stop:0 #E53935, stop:1 #C62828 ); }
+#CancelButton:pressed { background: #B71C1C; }
+#CancelButton:disabled { background: #cccccc; color: #999999; }
 
 #SaveButton {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 {{ color.text.secondary }},
-        stop: 1 {{ color.state.primary.hover }}
-    );
-    color: #ffffff;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 24px;
-    font-size: {{ typography.normal.size }}px;
-    font-weight: 700;
+    background: qlineargradient( x1:0,y1:0,x2:0,y2:1, stop:0 {{ color.text.secondary }}, stop:1 {{ color.state.primary.hover }} );
+    color:#fff;border:none;border-radius:8px;padding:8px 18px;
+    font-size: {{ typography.normal.size }}px; font-weight: 700;
 }
-
 #SaveButton:hover {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 0, y2: 1,
-        stop: 0 {{ color.state.primary.hover }},
-        stop: 1 {{ color.state.primary.active }}
-    );
+    background: qlineargradient( x1:0,y1:0,x2:0,y2:1, stop:0 {{ color.state.primary.hover }}, stop:1 {{ color.state.primary.active }} );
 }
+#SaveButton:pressed { background: {{ color.state.primary.active }}; }
+#SaveButton:disabled { background:#ccc;color:#999; }
 
-#SaveButton:pressed {
-    background: {{ color.state.primary.active }};
-}
-
-#SaveButton:disabled {
-    background: #cccccc;
-    color: #999999;
-}
-
-/* ============================================ */
-/*         More Button & Menu                  */
-/* ============================================ */
-
-#MoreButton {
-    background: {{ color.background.panel }};
-    border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    padding: 8px;
-}
-
-#MoreButton:hover {
-    background: {{ color.state.secondary.hover }};
-    border: 1px solid {{ color.state.primary.hover }};
-}
-
-#MoreButton:pressed {
-    background: {{ color.state.secondary.active }};
-}
-
-#MoreMenu {
-    background: {{ color.background.panel }};
-    border: 1px solid {{ color.border.default }};
+/* Status log (dưới cùng) */
+#StatusLog {
+    border: 1px dashed {{ color.border.default }};
     border-radius: 10px;
-    padding: 6px;
-}
-
-#MoreMenu::item {
-    padding: 10px 20px;
-    border-radius: 6px;
+    background: {{ color.background.base }};
+    padding: 8px;
+    font-size: 12px;
     color: {{ color.text.primary }};
-    font-size: {{ typography.normal.size }}px;
+    margin-top: 6px;
 }
 
-#MoreMenu::item:selected {
-    background: {{ color.state.secondary.hover }};
-}
-
-#MoreMenu::separator {
-    height: 1px;
-    background: {{ color.border.default }};
-    margin: 6px 10px;
-}
-
-/* ============================================ */
-/*         Loading Animation States            */
-/* ============================================ */
-
-#ProcessingFileItem[loading="true"] {
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.7;
-    }
-}
-
-/* ============================================ */
-/*         Responsive Adjustments              */
-/* ============================================ */
-
-#LeftPanel {
-    min-width: 280px;
-    max-width: 450px;
-}
-
-#RightPanel {
-    min-width: 500px;
-}
+/* Responsive width */
+#LeftPanel { min-width: 320px; max-width: 500px; }
+#RightPanel { min-width: 520px; }
