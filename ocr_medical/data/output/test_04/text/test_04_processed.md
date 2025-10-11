@@ -1,12 +1,6 @@
-| Đơn vị | Nồng độ | MoM |
-| --- | --- | --- |
-| AFP | ng/mL | 80.30 |
-| hCG Total | mlU/mL | 196248 |
-| uE3 | ng/mL | 0.481 |
-
-| Nguy cơ | Ngưỡng phân biệt | Kết luận |
-| --- | --- | --- |
-| Hội chứng Down (Trisomy 21) | >1/10 | Nguy cơ cao |
-| Hội chứng Down the tuổi mẹ | 1/808 | Nguy cơ thấp |
-| Hội chứng Edwards (Trisomy 18) | 1/1497 | Nguy cơ thấp |
-| Dị tật ống thần kinh | MoM AFP 1.40 | Nguy cơ thấp |
+| **Đơn vị** | **Nguy cơ** | **Nồng độ** | **MoM** |
+| --- | --- | --- | --- |
+| ng/mL | >1/10 | 80.30 | 1.40 |
+| mlU/mL | 1/808 | 1/250 | Nguy cơ cao |
+| ng/mL | 1/1497 | 1/350 | Nguy cơ thấp |
+| ng/mL | MoM AFP 1.40 | MoM AFP 2.5 | Nguy cơ thấp |

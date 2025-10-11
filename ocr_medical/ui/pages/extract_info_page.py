@@ -3,15 +3,17 @@ from PySide6.QtWidgets import (
     QLabel, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QProgressBar, QMessageBox, QWidget, QFileDialog, QMenu,
     QTabWidget, QDialog, QFormLayout, QLineEdit,
-    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QFrame
+    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QFrame,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QCheckBox
 )
 from PySide6.QtCore import (
-    Qt, QThread, Signal, QMutex, QMutexLocker, QSize, QPoint, QRect
+    Qt, QThread, Signal, QMutex, QMutexLocker, QSize, QPoint, QRect, QDateTime
 )
 from PySide6.QtGui import QPixmap, QMovie, QPainter, QColor
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, List
 import markdown
+import math
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
@@ -47,7 +49,7 @@ class FullscreenViewer(QGraphicsView):
 # ============================================================
 class PreviewPanel(QWidget):
     """
-    Khung preview: 
+    Khung preview:
       - empty: hiện icon no_image
       - loading: spinner + dòng chữ
       - ready: thông báo + nút fullscreen
@@ -70,8 +72,8 @@ class PreviewPanel(QWidget):
         self.no_img_label.setObjectName("NoImageLabel")
         no_icon_path = Path(__file__).resolve().parent.parent.parent / "assets" / "icon" / "no_image.svg"
         if no_icon_path.exists():
-            icon = load_svg_colored(no_icon_path, "#999999", 100)
-            pix = icon.pixmap(100, 100)  # ✅ convert QIcon -> QPixmap
+            icon = load_svg_colored(no_icon_path, "#A0A0A0", 120)
+            pix = icon.pixmap(120, 120)  # convert QIcon -> QPixmap
             self.no_img_label.setPixmap(pix)
         else:
             self.no_img_label.setText("🖼 No Image")
@@ -155,6 +157,153 @@ class PreviewPanel(QWidget):
 
 
 # ============================================================
+#                  FILE LIST (table below)
+# ============================================================
+class FileListTable(QTableWidget):
+    COL_FILE = 0
+    COL_SIZE = 1
+    COL_TIME = 2
+    COL_PROGRESS = 3
+    COL_STATUS = 4
+    COL_ACTION = 5
+
+    def __init__(self, parent=None):
+        super().__init__(0, 6, parent)
+        self.setObjectName("FileListTable")
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.verticalHeader().setVisible(False)
+        self.horizontalHeader().setStretchLastSection(False)
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.setAlternatingRowColors(True)
+        self.setShowGrid(False)
+
+        headers = ["File Name", "Size", "Processed Time", "Processed", "Status", "Action"]
+        self.setHorizontalHeaderLabels(headers)
+        self.setColumnWidth(self.COL_FILE, 280)
+        self.setColumnWidth(self.COL_SIZE, 90)
+        self.setColumnWidth(self.COL_TIME, 170)
+        self.setColumnWidth(self.COL_PROGRESS, 200)
+        self.setColumnWidth(self.COL_STATUS, 110)
+        self.setColumnWidth(self.COL_ACTION, 70)
+
+    @staticmethod
+    def _format_size(p: Path) -> str:
+        try:
+            b = p.stat().st_size
+        except Exception:
+            return "-"
+        mb = b / (1024 * 1024)
+        return f"{mb:.2f} MB"
+
+    def add_file_row(self, fpath: Path, orange_icon: Optional[Path], menu_icon: Optional[Path]) -> int:
+        row = self.rowCount()
+        self.insertRow(row)
+
+        # --- File cell with icon + name
+        widget = QWidget()
+        h = QHBoxLayout(widget)
+        h.setContentsMargins(6, 0, 0, 0)
+        h.setSpacing(8)
+
+        icon_lbl = QLabel()
+        if orange_icon and orange_icon.exists():
+            icon_lbl.setPixmap(load_svg_colored(orange_icon, "#FF7A00", 22).pixmap(22, 22))
+        else:
+            icon_lbl.setText("🧾")
+        name_lbl = QLabel(fpath.name)
+        name_lbl.setStyleSheet("font-weight:600;color:#333;")
+        h.addWidget(icon_lbl)
+        h.addWidget(name_lbl)
+        h.addStretch(1)
+        self.setCellWidget(row, self.COL_FILE, widget)
+
+        # --- Size
+        size_item = QTableWidgetItem(self._format_size(fpath))
+        size_item.setTextAlignment(Qt.AlignCenter)
+        self.setItem(row, self.COL_SIZE, size_item)
+
+        # --- Time (blank until done)
+        time_item = QTableWidgetItem("")
+        time_item.setTextAlignment(Qt.AlignCenter)
+        self.setItem(row, self.COL_TIME, time_item)
+
+        # --- Progress
+        pbar = QProgressBar()
+        pbar.setObjectName("RowProgress")
+        pbar.setRange(0, 100)
+        pbar.setValue(0)
+        pbar.setTextVisible(False)
+        self.setCellWidget(row, self.COL_PROGRESS, pbar)
+
+        # --- Status
+        status_lbl = QLabel("Pending")
+        status_lbl.setAlignment(Qt.AlignCenter)
+        status_lbl.setStyleSheet("color:#666; font-weight:600;")
+        self.setCellWidget(row, self.COL_STATUS, status_lbl)
+
+        # --- Action (three-dot)
+        btn = QPushButton()
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedSize(32, 28)
+        if menu_icon and menu_icon.exists():
+            btn.setIcon(load_svg_colored(menu_icon, "#666666", 16))
+        else:
+            btn.setText("⋮")
+        btn.setStyleSheet("border:none;")
+        btn.clicked.connect(lambda: self._open_row_menu(btn, fpath))
+        self.setCellWidget(row, self.COL_ACTION, btn)
+
+        return row
+
+    def _open_row_menu(self, btn: QPushButton, fpath: Path):
+        menu = QMenu(self)
+        open_dir = menu.addAction("Open containing folder")
+        copy_name = menu.addAction("Copy filename")
+        pos = btn.mapToGlobal(QPoint(0, btn.height()))
+        action = menu.exec(pos)
+        if action == open_dir:
+            try:
+                # best-effort open folder
+                import os, platform, subprocess
+                if platform.system() == "Windows":
+                    os.startfile(str(fpath.parent))
+                elif platform.system() == "Darwin":
+                    subprocess.call(["open", str(fpath.parent)])
+                else:
+                    subprocess.call(["xdg-open", str(fpath.parent)])
+            except Exception:
+                pass
+        elif action == copy_name:
+            btn.window().clipboard().setText(fpath.name)
+
+    # --- helpers to update row
+    def set_row_progress(self, row: int, val: int):
+        w = self.cellWidget(row, self.COL_PROGRESS)
+        if isinstance(w, QProgressBar):
+            w.setValue(val)
+
+    def set_row_status(self, row: int, text: str, ok: bool | None = None):
+        w = self.cellWidget(row, self.COL_STATUS)
+        if isinstance(w, QLabel):
+            color = "#333"
+            if ok is True:
+                color = "#28A745"
+            elif ok is False:
+                color = "#D32F2F"
+            w.setText(text)
+            w.setStyleSheet(f"color:{color}; font-weight:600;")
+
+    def set_row_time_now(self, row: int):
+        t = QDateTime.currentDateTime().toString("yyyy-MM-dd – HH:mm")
+        item = self.item(row, self.COL_TIME)
+        if item:
+            item.setText(t)
+
+
+# ============================================================
 #                      MAIN PAGE
 # ============================================================
 class ExtraInfoPage(BasePage):
@@ -202,7 +351,7 @@ class ExtraInfoPage(BasePage):
         lbox = QVBoxLayout(left_panel)
         lbox.setSpacing(6)
 
-        title1 = QLabel("📁 File Preview")
+        title1 = QLabel("File Preview")
         title1.setObjectName("SectionLabel")
         lbox.addWidget(title1)
 
@@ -218,7 +367,7 @@ class ExtraInfoPage(BasePage):
         rbox = QVBoxLayout(right_panel)
         rbox.setSpacing(6)
 
-        title2 = QLabel("🧾 Result Display")
+        title2 = QLabel("Result Display")
         title2.setObjectName("SectionLabel")
         rbox.addWidget(title2)
 
@@ -242,6 +391,15 @@ class ExtraInfoPage(BasePage):
 
         main_layout.addLayout(body, 1)
 
+        # --- File list section (table) ---
+        table_box = QVBoxLayout()
+        table_box.setSpacing(6)
+
+        self.file_table = FileListTable()
+        table_box.addWidget(self.file_table)
+
+        main_layout.addLayout(table_box)
+
         # --- Progress + Status (gộp chung box) ---
         self.status_box = QFrame()
         self.status_box.setObjectName("StatusBox")
@@ -256,7 +414,7 @@ class ExtraInfoPage(BasePage):
         self.status_log = QTextEdit()
         self.status_log.setObjectName("StatusLog")
         self.status_log.setReadOnly(True)
-        self.status_log.setMinimumHeight(100)
+        self.status_log.setMinimumHeight(90)
         sb_lay.addWidget(self.status_log)
 
         main_layout.addWidget(self.status_box)
@@ -264,39 +422,54 @@ class ExtraInfoPage(BasePage):
         # --- Buttons bottom ---
         btns = QHBoxLayout()
         btns.setSpacing(8)
-        self.back_btn = QPushButton("  Back")
+
+        left_btns = QVBoxLayout()
+        left_btns.setSpacing(4)
+
+        self.back_btn = QPushButton("Back")
         self.back_btn.setObjectName("BackButton")
         back_icon = self.project_root / "assets" / "icon" / "back_page.svg"
         if back_icon.exists():
             self.back_btn.setIcon(load_svg_colored(back_icon, self.theme_data["color"]["text"]["primary"], 18))
         self.back_btn.clicked.connect(lambda: self.navigate_back_requested.emit())
 
-        self.cancel_btn = QPushButton("  Stop OCR")
-        self.cancel_btn.setObjectName("CancelButton")
-        self.cancel_btn.setEnabled(False)
-        stop_icon = self.project_root / "assets" / "icon" / "stop_ocr.svg"
-        if stop_icon.exists():
-            self.cancel_btn.setIcon(load_svg_colored(stop_icon, "#ffffff", 18))
-        self.cancel_btn.clicked.connect(self._cancel_processing)
+        # Stop OCR toggle (disabled mặc định, bật khi đang xử lý)
+        self.stop_toggle = QCheckBox("Stop OCR")
+        self.stop_toggle.setEnabled(False)
+        self.stop_toggle.setChecked(False)
+        # style toggle đơn giản
+        self.stop_toggle.setStyleSheet("""
+            QCheckBox { color:#666; }
+            QCheckBox::indicator { width:42px; height:22px; }
+            QCheckBox::indicator:unchecked { border-radius:11px; background:#E0E0E0; }
+            QCheckBox::indicator:checked { border-radius:11px; background:#FF9800; }
+        """)
+        self.stop_toggle.stateChanged.connect(self._on_toggle_stop)
+
+        left_btns.addWidget(self.back_btn, 0, Qt.AlignLeft)
+        left_btns.addWidget(self.stop_toggle, 0, Qt.AlignLeft)
+
+        btns.addLayout(left_btns)
+
+        btns.addStretch(1)
 
         self.save_btn = QPushButton("💾 Save Changes")
         self.save_btn.setObjectName("SaveButton")
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._save_changes)
-
-        btns.addWidget(self.back_btn)
-        btns.addWidget(self.cancel_btn)
-        btns.addStretch(1)
         btns.addWidget(self.save_btn)
+
         main_layout.addLayout(btns)
 
         # Internal state
         self.thread: Optional[PipelineThread] = None
         self.current_file_path: Optional[Path] = None
         self.current_markdown: str = ""
+        self.row_by_stem: Dict[str, int] = {}  # map file.stem -> row index
 
         # Signals
         self.raw_text.textChanged.connect(self._on_markdown_edited)
+        self.file_table.itemSelectionChanged.connect(self._on_row_selected)
 
     # ===================== Helpers =====================
     def _open_fullscreen_dialog(self, pixmap: QPixmap):
@@ -329,6 +502,44 @@ class ExtraInfoPage(BasePage):
     def _append_status(self, s: str):
         self.status_log.append(s)
 
+    def _on_toggle_stop(self, state: int):
+        if state == Qt.Checked:
+            self._cancel_processing()
+
+    def _on_row_selected(self):
+        row = self._selected_row()
+        if row is None:
+            return
+        # mở xem ảnh/markdown tương ứng nếu đã tồn tại trong output
+        name_item = self.file_table.cellWidget(row, FileListTable.COL_FILE)
+        if not isinstance(name_item, QWidget):
+            return
+        name_lbl: QLabel = name_item.findChildren(QLabel)[1]  # icon + label
+        fname = name_lbl.text()
+        stem = Path(fname).stem
+
+        base = Path(__file__).resolve().parent.parent.parent / "data" / "output" / stem
+        processed_img = base / "processed" / f"{stem}_processed.png"
+        text_md = base / "text" / f"{stem}_processed.md"
+
+        if processed_img.exists():
+            pix = QPixmap(str(processed_img))
+            if not pix.isNull():
+                self.preview_panel.set_ready(pix)
+        else:
+            self.preview_panel.set_loading(False)
+
+        if text_md.exists():
+            with open(text_md, "r", encoding="utf-8") as f:
+                self.raw_text.setPlainText(f.read())
+        else:
+            self.raw_text.clear()
+            self.preview_text.setHtml("<div style='color:#9aa1a9;text-align:center;'>Phần này là thông tin trích xuất</div>")
+
+    def _selected_row(self) -> Optional[int]:
+        sel = self.file_table.selectionModel().selectedRows()
+        return sel[0].row() if sel else None
+
     # =================== Public API ===================
     def load_files(self, files: list[Path]):
         if not files:
@@ -344,16 +555,30 @@ class ExtraInfoPage(BasePage):
         self.progress_bar.setValue(0)
         self.status_log.clear()
         self.preview_panel.set_loading(True)
-        self.cancel_btn.setEnabled(True)
+        self.stop_toggle.setEnabled(True)
+        self.stop_toggle.setChecked(False)
         self.back_btn.setEnabled(False)
         self.save_btn.setEnabled(False)
 
+        # build table rows
+        self.file_table.setRowCount(0)
+        self.row_by_stem.clear()
+        orange_icon = self.project_root / "assets" / "icon" / "file_image.svg"
+        menu_icon = self.project_root / "assets" / "icon" / "more_vertical.svg"
+        for f in files:
+            row = self.file_table.add_file_row(f, orange_icon, menu_icon)
+            self.row_by_stem[f.stem] = row
+        if files:
+            self.file_table.selectRow(0)
+
         # start pipeline
         self.thread = PipelineThread(files)
-        self.thread.progress_update.connect(self.progress_bar.setValue)
+        self.thread.total_progress.connect(self.progress_bar.setValue)
         self.thread.status_changed.connect(self._append_status)
         self.thread.image_processed.connect(self._on_image_processed)
         self.thread.info_extracted.connect(self._display_info)
+        self.thread.row_progress.connect(self._on_row_progress)
+        self.thread.row_finished.connect(self._on_row_finished)
         self.thread.finished.connect(self._on_finished)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
@@ -369,14 +594,28 @@ class ExtraInfoPage(BasePage):
         self.current_markdown = info
         self.raw_text.setPlainText(info)  # triggers preview update via _on_markdown_edited
 
+    def _on_row_progress(self, stem: str, val: int):
+        row = self.row_by_stem.get(stem)
+        if row is not None:
+            self.file_table.set_row_progress(row, val)
+            if val < 100:
+                self.file_table.set_row_status(row, "Processing...", None)
+
+    def _on_row_finished(self, stem: str, ok: bool):
+        row = self.row_by_stem.get(stem)
+        if row is None:
+            return
+        self.file_table.set_row_progress(row, 100 if ok else 0)
+        self.file_table.set_row_status(row, "Success" if ok else "Error", ok)
+        self.file_table.set_row_time_now(row)
+
     def _on_finished(self):
         self.progress_bar.setValue(100)
         self._append_status("✅ All files processed successfully")
-        self.cancel_btn.setEnabled(False)
+        self.stop_toggle.setEnabled(False)
         self.back_btn.setEnabled(True)
         self.save_btn.setEnabled(True)
         # Nếu không có ảnh → về trạng thái empty
-        # (preview_panel tự dừng spinner trong _set_state)
         if self.preview_panel._last_pixmap is None:
             self.preview_panel.set_loading(False)
 
@@ -483,7 +722,7 @@ class ExtraInfoPage(BasePage):
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
             ) == QMessageBox.Yes:
                 self.thread.cancel()
-                self.cancel_btn.setEnabled(False)
+                self.stop_toggle.setEnabled(False)
                 self.status_log.append("⚠️ Processing cancelled by user")
                 self.preview_panel.set_loading(False)
 
@@ -492,10 +731,15 @@ class ExtraInfoPage(BasePage):
 #                      PIPELINE THREAD
 # ============================================================
 class PipelineThread(QThread):
-    progress_update = Signal(int)
+    total_progress = Signal(int)            # overall % for top progress bar
     status_changed = Signal(str)
     image_processed = Signal(Path)
     info_extracted = Signal(str)
+
+    # per-row updates
+    row_progress = Signal(str, int)         # stem, %
+    row_finished = Signal(str, bool)        # stem, ok?
+
     finished = Signal()
 
     def __init__(self, files: list[Path]):
@@ -511,6 +755,7 @@ class PipelineThread(QThread):
     def run(self):
         total = len(self.files)
         for i, file in enumerate(self.files, start=1):
+            stem = file.stem
             with QMutexLocker(self._lock):
                 if self._is_cancelled:
                     self.finished.emit()
@@ -521,9 +766,12 @@ class PipelineThread(QThread):
             try:
                 status_manager.reset()
 
+                # simulate steps with progress per-row
+                self._progress_row(stem, 5)
                 self._emit_step(f"🔄 Loading image: {file.name}")
                 self.msleep(200)
 
+                self._progress_row(stem, 25)
                 self._emit_step("🖼️ Enhancing image quality...")
                 process_input(str(file))
                 self.msleep(300)
@@ -533,6 +781,7 @@ class PipelineThread(QThread):
                 if processed_path.exists():
                     self._emit_step(f"✅ Image processed: {file.name}")
                     self.image_processed.emit(processed_path)
+                    self._progress_row(stem, 60)
 
                 self._emit_step("🔍 Extracting text with OCR...")
                 self.msleep(300)
@@ -542,13 +791,22 @@ class PipelineThread(QThread):
                     with open(text_path, "r", encoding="utf-8") as f:
                         self.info_extracted.emit(f.read())
                     self._emit_step(f"✅ OCR completed: {file.name}")
+                    self._progress_row(stem, 100)
+                    self.row_finished.emit(stem, True)
+                else:
+                    # Still mark finished but not ok
+                    self.row_finished.emit(stem, False)
 
             except Exception as e:
                 self._emit_step(f"❌ Error processing {file.name}: {e}")
+                self.row_finished.emit(stem, False)
 
-            self.progress_update.emit(int((i / total) * 100))
+            self.total_progress.emit(int((i / total) * 100))
 
         self.finished.emit()
+
+    def _progress_row(self, stem: str, val: int):
+        self.row_progress.emit(stem, max(0, min(100, val)))
 
     def _emit_step(self, msg: str):
         self.status_changed.emit(msg)

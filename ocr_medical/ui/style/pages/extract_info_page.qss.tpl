@@ -8,7 +8,6 @@
     font-weight: {{ typography.heading2.weight }};
     color: {{ color.text.primary }};
     padding: 2px 0;
-    margin: 0 0 4px 0;
 }
 
 /* Panels (giảm padding để sát hơn) */

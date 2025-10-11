@@ -74,3 +74,19 @@ QPushButton[nav="true"]:checked {
     margin-top: 2px;
     margin-bottom: 2px;
 }
+
+* {
+    outline: none;
+}
+
+QWidget {
+    outline: none;
+}
+
+QPushButton:focus,
+QLineEdit:focus,
+QTextEdit:focus,
+QComboBox:focus {
+    outline: none;
+    border: 1px solid {{ color.border.default }};
+}

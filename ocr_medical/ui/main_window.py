@@ -96,6 +96,17 @@ class MainWindow(QMainWindow):
             self.theme_manager.get_theme_data(),
             self.theme_manager.get_theme_name()
         )
+        self.disable_focus_policy()
+    def disable_focus_policy(self):
+        """Disable focus policy cho toàn bộ ứng dụng"""
+        self.set_focus_policy_recursive(self, Qt.NoFocus)
+    
+    @staticmethod
+    def set_focus_policy_recursive(widget, policy):
+        """Recursively set focus policy cho tất cả children"""
+        widget.setFocusPolicy(policy)
+        for child in widget.findChildren(QWidget):
+            child.setFocusPolicy(policy)
 
     def _add_page(self, key: str, widget: QWidget) -> None:
         idx = self.stack.addWidget(widget)

@@ -95,6 +95,11 @@
     background: {{ color.state.primary.active }};
 }
 
+#ProcessButton:disabled {
+    background: #cccccc;
+    color: #999999;
+}
+
 #FileName {
     font-size: {{ typography.normal.size }}px;
     color: {{ color.text.primary }};
@@ -103,6 +108,12 @@
 #FileSize {
     font-size: 13px;
     color: #666;
+}
+
+#FileIndex {
+    font-size: {{ typography.normal.size }}px;
+    color: {{ color.text.primary }};
+    font-weight: 600;
 }
 
 #DeleteButton {
@@ -125,12 +136,51 @@
     background: {{ color.background.panel }};
     border: 1px solid {{ color.border.default }};
     border-radius: 12px;
-    padding: 6px 10px;
+    padding: 0px;
+}
+
+#FileListHeader {
+    background: {{ color.background.base }};
+    border-bottom: 1px solid {{ color.border.default }};
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+}
+
+#FileHeaderColumn {
+    background: {{ color.background.base }};
+    border-right: 1px solid {{ color.border.default }};
+}
+
+#FileHeaderColumn:last-child {
+    border-right: none;
+}
+
+#FileHeaderLabel {
+    font-size: {{ typography.normal.size }}px;
+    color: {{ color.text.primary }};
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+#FileListSeparator {
+    background: {{ color.border.default }};
+}
+
+#FileItemColumn {
+    background: transparent;
+    border-right: 1px solid {{ color.border.default }};
+}
+
+#FileItemColumn:last-child {
+    border-right: none;
 }
 
 #FileItem {
-    border-top: none;
-    border-left: none;
-    border-right: none;
     border-bottom: 1px solid {{ color.border.default }};
+}
+
+#FileItem:last-child {
+    border-bottom: none;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
 }
