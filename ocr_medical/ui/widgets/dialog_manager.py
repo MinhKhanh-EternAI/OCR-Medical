@@ -1,9 +1,3 @@
-# ocr_medical/ui/widgets/dialog_manager.py
-"""
-Centralized Dialog Manager for all QMessageBox instances
-Giúp dễ dàng chỉnh sửa styling và behavior của tất cả dialogs
-"""
-
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtCore import Qt
 from typing import Optional
