@@ -72,7 +72,7 @@ class FileItem(QFrame):
         except Exception as e:
             logger.warning(f"Failed to load file icon: {e}")
         
-        icon_label.setFixedSize(28, 28)
+        icon_label.setFixedSize(25, 25)
         icon_label.setObjectName("FileIcon")
         name_layout.addWidget(icon_label)
 
