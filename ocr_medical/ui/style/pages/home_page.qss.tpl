@@ -141,7 +141,8 @@
 
 #FileListHeader {
     background: {{ color.background.base }};
-    border-bottom: 1px solid {{ color.border.default }};
+    border: 1px solid {{ color.border.default }};
+    border-bottom: none;
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
 }
