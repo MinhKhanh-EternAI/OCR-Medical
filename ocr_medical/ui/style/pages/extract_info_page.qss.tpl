@@ -25,8 +25,7 @@
 #PreviewBox {
     border: 1px solid {{ color.border.default }};
     border-radius: 12px;
-    background: #ffffff;
-    padding: 60px;
+    padding: 12px;
 }
 
 /* ============================================================
@@ -49,7 +48,7 @@
 
 /* --- Header row --- */
 #FileListHeader {
-    background: {{ color.state.secondary.hover }};
+    background: {{ color.background.base }};
     border: 1px solid {{ color.border.default }};
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
@@ -68,7 +67,7 @@
 
 #FileRowItem {
     border: none;
-    border-bottom: 1px solid #E5E7EB;
+    border-bottom: 1px solid {{ color.border.default }};
     color: {{ color.text.primary }};
     font-size: {{ typography.normal.size }}px;
 }
@@ -92,7 +91,6 @@
 #TabContainer {
     border: 1px solid {{ color.border.default }};
     border-radius: 12px;
-    background: #ffffff;
     padding: 0;
 }
 
@@ -101,13 +99,16 @@
     font-size: {{ typography.normal.size }}px;
     color: {{ color.text.primary }};
     border: none;
-    border-bottom: 2px solid transparent;
+    border-bottom: 2px solid {{ color.border.default }};
     background: transparent;
-    padding: 8px;
+    padding: 12px 6px;
 }
 #TabButton:hover {
-    background: {{ color.state.secondary.hover }};
+    border: none;
+    color: {{ color.text.secondary }};
+    border-bottom: 2px solid {{ color.text.secondary }};
 }
+
 #TabButton:checked {
     color: {{ color.text.secondary }};
     border-bottom: 2px solid {{ color.text.secondary }};
@@ -117,53 +118,79 @@
 #ResultBox {
     border: none;
     background: transparent;
-    padding: 60px;
-    color: {{ color.text.muted }};
-    text-align: center;
+    padding: 16px;
+    color: #000;
+    font-size: 14px;
+    text-align: left;
 }
 
 /* ============================================================
-   BUTTONS
+   BUTTONS (Unified size, padding, and typography)
    ============================================================ */
 #MoreButton {
-    border: none;
+    border: 1px solid {{ color.border.default }};
+    border-radius: 6px;
     background: transparent;
 }
 #MoreButton:hover {
-    background: {{ color.state.secondary.hover }};
-    border-radius: 6px;
+    background: {{ color.background.base }};
 }
 
-#FooterButton, #FooterStopButton, #FooterSaveButton {
-    min-height: 32px;
-    min-width: 110px;
-    font-weight: 600;
-    font-size: 13px;
+/* --- Unified base style for all footer buttons --- */
+#FooterButton, 
+#FooterStopButton, 
+#FooterSaveButton,
+#FooterSaveAsButton {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 700;
     border-radius: 6px;
-    padding: 4px 10px;
+    min-width: 110px; 
 }
 
+#FooterButton:disabled,
+#FooterStopButton:disabled,
+#FooterSaveButton:disabled,
+#FooterSaveAsButton:disabled {
+    background: #cccccc !important;
+    color: #999999 !important;
+    opacity: 0.7;
+}
+
+/* --- Back button --- */
 #FooterButton {
     border: 1px solid {{ color.border.default }};
     color: {{ color.text.secondary }};
-    background: #ffffff;
+    background: transparent;
 }
 #FooterButton:hover {
     background: {{ color.state.secondary.hover }};
 }
 
+/* --- Stop OCR button --- */
 #FooterStopButton {
     border: none;
     color: #ffffff;
-    background: #C1C1C1;
+    background: #FE2020;
 }
 #FooterStopButton:hover {
     background: #AFAFAF;
 }
 
+/* --- Save As button --- */
+#FooterSaveAsButton {
+    border: 1px solid {{ color.border.default }};
+    color: {{ color.text.primary }};
+    background: #ffffff;
+}
+#FooterSaveAsButton:hover {
+    background: {{ color.state.secondary.hover }};
+}
+
+/* --- Save button --- */
 #FooterSaveButton {
     border: none;
-    color: #fff;
+    color: #ffffff;
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #2C7BE5, stop:1 #175CD3);
 }

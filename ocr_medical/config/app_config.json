@@ -1,10 +1,10 @@
 {
-  "last_screen": 0,
+  "last_screen": 1,
   "geometry": [
-    0,
-    23,
-    1920,
-    1009
+    -1892,
+    46,
+    1365,
+    741
   ],
   "is_maximized": true,
   "is_fullscreen": false,

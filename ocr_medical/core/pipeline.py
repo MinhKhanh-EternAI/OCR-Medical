@@ -14,15 +14,23 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "output"   # 📌 sửa lại đường
 
 # 📌 Prompt mặc định
 DEFAULT_PROMPT = (
-    "Hãy trích xuất toàn bộ dữ liệu bảng trong ảnh và trình bày lại dưới dạng bảng Markdown. "
-    "Yêu cầu định dạng rõ ràng như sau:\n"
-    "- Hàng tiêu đề in đậm.\n"
-    "- Các cột căn chỉnh bằng dấu | với khoảng trắng đều.\n"
-    "- Các mục quan trọng (ví dụ MIỄN DỊCH, PXN VI SINH) phải in đậm.\n"
-    "- Giữ nguyên ký hiệu đặc biệt (ví dụ dấu * phải hiển thị là \\*).\n"
-    "- Giá trị số giữ nguyên định dạng, đơn vị hiển thị đúng như trong ảnh.\n"
-    "Chỉ trả về bảng Markdown, không thêm lời giải thích."
+    "Hãy trích xuất toàn bộ nội dung văn bản có trong ảnh, bao gồm cả chữ, số, ký hiệu đặc biệt "
+    "và các cấu trúc bảng nếu có. "
+    "Yêu cầu trình bày kết quả như sau:\n"
+    "1. Nếu ảnh chứa bảng dữ liệu:\n"
+    "   - Trình bày lại dưới dạng **bảng Markdown** với định dạng rõ ràng.\n"
+    "   - Hàng tiêu đề in đậm.\n"
+    "   - Các cột căn chỉnh bằng dấu | và khoảng trắng đều.\n"
+    "   - Các mục quan trọng (ví dụ: MIỄN DỊCH, PXN VI SINH) phải in đậm.\n"
+    "   - Giữ nguyên ký hiệu đặc biệt (ví dụ dấu * phải hiển thị là \\*).\n"
+    "   - Giá trị số và đơn vị giữ nguyên định dạng gốc.\n"
+    "2. Nếu ảnh **không chứa bảng** mà chỉ có đoạn văn, chữ viết hoặc ký tự rời:\n"
+    "   - Hãy trích xuất toàn bộ văn bản đúng theo thứ tự hiển thị từ trên xuống dưới, trái sang phải.\n"
+    "   - Giữ nguyên ngắt dòng, dấu câu và ký hiệu đặc biệt.\n"
+    "   - Không thêm lời giải thích hay định dạng Markdown.\n"
+    "Kết quả chỉ bao gồm phần nội dung đã trích xuất, không thêm mô tả hoặc phân tích."
 )
+
 
 def save_text(processed_path: Path, img_name: str, output_root: Path):
     """
