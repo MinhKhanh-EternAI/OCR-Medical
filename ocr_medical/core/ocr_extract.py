@@ -3,7 +3,7 @@ import json
 import requests
 from ocr_medical.core.status import status_manager
 
-BASE_URL = "http://192.168.1.195:1234/v1"
+BASE_URL = "http://192.168.1.2:1234/v1"
 MODEL_ID = "qwen/qwen2.5-vl-7b"
 
 

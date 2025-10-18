@@ -1,5 +1,5 @@
 /* ============================================================
-   Extract Info Page – Light theme polished version
+   Extract Info Page – Light theme polished version (updated)
    ============================================================ */
 
 /* --- Layout containers --- */
@@ -31,7 +31,6 @@
 /* ============================================================
    FILE LIST AREA
    ============================================================ */
-
 #FileScroll {
     background: transparent;
     border-left: 1px solid {{ color.border.default }};
@@ -41,48 +40,28 @@
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
 }
-#FileListFrame {
-    border: none;
+
+#FileListContainer {
     background: transparent;
 }
 
-/* --- Header row --- */
 #FileListHeader {
     background: {{ color.background.base }};
     border: 1px solid {{ color.border.default }};
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
     border-bottom: none;
-
     font-weight: 600;
     color: {{ color.text.primary }};
     font-size: {{ typography.normal.size }}px;
 }
-
-/* --- File rows --- */
-#FileListContainer {
-    background: transparent;
-    border: none;
-}
-
 #FileRowItem {
-    border: none;
     border-bottom: 1px solid {{ color.border.default }};
     color: {{ color.text.primary }};
     font-size: {{ typography.normal.size }}px;
 }
-
-#FileRowItem:last-child {
-    border-bottom: none;
-}
-
 #FileRowItem:hover {
     background: {{ color.state.secondary.hover }};
-}
-
-/* --- Status text --- */
-#FileRowItem QLabel {
-    font-size: 13px;
 }
 
 /* ============================================================
@@ -93,7 +72,6 @@
     border-radius: 12px;
     padding: 0;
 }
-
 #TabButton {
     font-weight: 600;
     font-size: {{ typography.normal.size }}px;
@@ -104,11 +82,9 @@
     padding: 12px 6px;
 }
 #TabButton:hover {
-    border: none;
     color: {{ color.text.secondary }};
     border-bottom: 2px solid {{ color.text.secondary }};
 }
-
 #TabButton:checked {
     color: {{ color.text.secondary }};
     border-bottom: 2px solid {{ color.text.secondary }};
@@ -119,81 +95,104 @@
     border: none;
     background: transparent;
     padding: 16px;
-    color: #000;
-    font-size: 14px;
-    text-align: left;
+}
+QWebEngineView#ResultContent,
+QTextEdit#ResultContent {
+    border: none;
+    background: transparent;
+    outline: none;
+    padding: 8px;
+    color: {{ color.text.primary }};
+    font-size: 15px;
+    font-family: 'Segoe UI', sans-serif;
+}
+#EmptyStateLabel {
+    font-size: 15px;
+    color: {{ color.text.muted }};
+    font-style: italic;
+    text-align: center;
 }
 
 /* ============================================================
-   BUTTONS (Unified size, padding, and typography)
+   LOADING TEXT
    ============================================================ */
-#MoreButton {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    background: transparent;
-}
-#MoreButton:hover {
-    background: {{ color.background.base }};
+#LoadingText {
+    font-size: 32px;
+    font-weight: 600;
+    color: {{ color.text.secondary }};
+    text-align: center;
+    padding: 8px;
 }
 
-/* --- Unified base style for all footer buttons --- */
-#FooterButton, 
-#FooterStopButton, 
+/* ============================================================
+   FOOTER BUTTONS
+   ============================================================ */
+#FooterButton,
+#FooterStopButton,
 #FooterSaveButton,
 #FooterSaveAsButton {
     padding: 8px 16px;
     font-size: 14px;
     font-weight: 700;
     border-radius: 6px;
-    min-width: 110px; 
+    min-width: 110px;
+    transition: all 0.2s ease-in-out;
 }
 
-#FooterButton:disabled,
-#FooterStopButton:disabled,
-#FooterSaveButton:disabled,
-#FooterSaveAsButton:disabled {
-    background: #cccccc !important;
-    color: #999999 !important;
-    opacity: 0.7;
+/* --- STOP --- */
+#FooterStopButton {
+    border: none;
+    color: #fff;
+    background: #FE2020;
+}
+#FooterStopButton:hover {
+    background: #FF4D4D;
+    transform: scale(1.03);
 }
 
-/* --- Back button --- */
+/* --- SAVE --- */
+#FooterSaveButton {
+    border: none;
+    color: #fff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #2C7BE5, stop:1 #175CD3);
+}
+#FooterSaveButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #3D8BFF, stop:1 #1A5BE8);
+}
+
+/* --- SAVE AS --- */
+#FooterSaveAsButton {
+    border: 1px solid {{ color.border.default }};
+    color: {{ color.text.primary }};
+    background: #fff;
+}
+#FooterSaveAsButton:hover {
+    background: #E9F1FF;
+    border: 1px solid #2C7BE5;
+    color: #175CD3;
+}
+
+/* --- DEFAULT BUTTON (Back, etc.) --- */
 #FooterButton {
     border: 1px solid {{ color.border.default }};
     color: {{ color.text.secondary }};
     background: transparent;
 }
 #FooterButton:hover {
-    background: {{ color.state.secondary.hover }};
+    background: {{ color.state.secondary.active }};
+    color: {{ color.text.secondary }};
+    border-color: {{ color.state.primary.state }};
 }
 
-/* --- Stop OCR button --- */
-#FooterStopButton {
-    border: none;
-    color: #ffffff;
-    background: #FE2020;
-}
-#FooterStopButton:hover {
-    background: #AFAFAF;
-}
-
-/* --- Save As button --- */
-#FooterSaveAsButton {
-    border: 1px solid {{ color.border.default }};
-    color: {{ color.text.primary }};
-    background: #ffffff;
-}
-#FooterSaveAsButton:hover {
-    background: {{ color.state.secondary.hover }};
-}
-
-/* --- Save button --- */
-#FooterSaveButton {
-    border: none;
-    color: #ffffff;
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #2C7BE5, stop:1 #175CD3);
-}
-#FooterSaveButton:hover {
-    background: #357ABD;
+/* --- DISABLED STATES --- */
+#FooterStopButton:disabled,
+#FooterSaveButton:disabled,
+#FooterSaveAsButton:disabled,
+#FooterButton:disabled {
+    background: #cccccc;
+    color: #999999;
+    box-shadow: none;
+    transform: none;
 }
