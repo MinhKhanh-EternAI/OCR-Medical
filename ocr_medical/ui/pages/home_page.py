@@ -1,13 +1,15 @@
 from __future__ import annotations
+from pathlib import Path
+from PySide6.QtCore import Qt, Signal, QSize, QStandardPaths
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QLineEdit, QSizePolicy,
                                QPushButton, QLabel, QFrame, QFileDialog, QWidget,
                                QScrollArea, QMessageBox, QGridLayout)
 from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt, QSize, Signal
-from pathlib import Path
 from threading import Lock
 import os
 import logging
+import json
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
@@ -356,11 +358,8 @@ class HomePage(BasePage):
         folder_layout.addWidget(folder_label)
         storage_layout.addWidget(folder_box)
 
-        default_output = self.project_root / "data" / "output"
-        try:
-            default_output.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Failed to create default output directory: {e}")
+        # Load storage directory từ config
+        default_output = self._load_storage_dir()
 
         self.storage_path = QLineEdit(str(default_output))
         self.storage_path.setObjectName("StoragePath")
@@ -434,6 +433,38 @@ class HomePage(BasePage):
         """Helper method to get icon path"""
         return self.project_root / "assets" / "icon" / icon_name
 
+    def _load_storage_dir(self) -> Path:
+        """Load storage directory từ config file (ưu tiên storage_path nếu có, rỗng thì dùng AppLocal)"""
+        from PySide6.QtCore import QStandardPaths
+        import json, logging
+        from pathlib import Path
+        logger = logging.getLogger(__name__)
+
+        config_path = self.project_root / "config" / "app_config.json"
+        try:
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    storage_path_str = config.get("storage_path", "").strip()
+                    if storage_path_str:
+                        custom_dir = Path(storage_path_str)
+                        if custom_dir.exists():
+                            logger.info(f"Using custom storage path: {custom_dir}")
+                            return custom_dir
+                        else:
+                            logger.warning(f"Storage_path không tồn tại: {custom_dir}")
+
+            app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+            default_path = Path(app_data) / "OCR-Medical" / "output"
+            default_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Using default AppData directory: {default_path}")
+            return default_path
+        except Exception as e:
+            logger.error(f"Error loading storage directory from config: {str(e)}")
+            fallback = self.project_root / "data" / "output"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
+
     def _show_coming_soon_camera(self):
         """Show coming soon message for camera feature"""
         QMessageBox.information(
@@ -470,13 +501,28 @@ class HomePage(BasePage):
             QMessageBox.critical(self, "Error", f"Failed to scan folder: {str(e)}")
 
     def choose_storage_dir(self):
-        """Choose storage directory"""
+        """Choose storage directory and save to config"""
         folder = QFileDialog.getExistingDirectory(self, "Select storage directory")
         if folder:
             try:
                 storage_path = Path(folder)
                 storage_path.mkdir(parents=True, exist_ok=True)
                 self.storage_path.setText(folder)
+                
+                # Lưu vào config
+                config_path = self.project_root / "config" / "app_config.json"
+                config = {}
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                
+                config["storage_dir"] = str(storage_path)
+                
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=2)
+                
+                logger.info(f"Storage directory updated to: {storage_path}")
+                
             except Exception as e:
                 logger.error(f"Error choosing storage directory: {e}")
                 QMessageBox.warning(

@@ -6,8 +6,12 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QSizePolicy, QSpacer
 
 from ocr_medical.ui.style.style_loader import load_svg_colored
 from ocr_medical.ui.style.theme_manager import ThemeManager
+from ocr_medical.utils.path_helper import resource_path
 
 
+# ============================================================
+#                     NavButton
+# ============================================================
 class NavButton(QWidget):
     """Custom nav button với icon đổi màu theo trạng thái"""
 
@@ -30,9 +34,8 @@ class NavButton(QWidget):
         self.active_color = theme_data["color"]["text"]["secondary"]
 
         # Set icon mặc định
-        if icon_path.exists():
-            self.btn.setIcon(load_svg_colored(
-                icon_path, self.normal_color, 20))
+        if self.icon_path.exists():
+            self.btn.setIcon(load_svg_colored(self.icon_path, self.normal_color, 20))
             self.btn.setIconSize(QSize(20, 20))
 
         # Khi toggle (active)
@@ -54,24 +57,24 @@ class NavButton(QWidget):
     def _on_enter(self, event):
         """Đổi màu icon khi hover"""
         if self.icon_path.exists() and not self.btn.isChecked():
-            self.btn.setIcon(load_svg_colored(
-                self.icon_path, self.hover_color, 20))
+            self.btn.setIcon(load_svg_colored(self.icon_path, self.hover_color, 20))
         QPushButton.enterEvent(self.btn, event)
 
     def _on_leave(self, event):
         """Trả lại màu icon khi rời hover"""
         if self.icon_path.exists() and not self.btn.isChecked():
-            self.btn.setIcon(load_svg_colored(
-                self.icon_path, self.normal_color, 20))
+            self.btn.setIcon(load_svg_colored(self.icon_path, self.normal_color, 20))
         QPushButton.leaveEvent(self.btn, event)
 
 
+# ============================================================
+#                     SidePanel
+# ============================================================
 class SidePanel(QWidget):
     page_selected = Signal(str)
 
     def __init__(self, project_root: Path, theme_manager: ThemeManager, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-
         self.setObjectName("SidePanel")
 
         self.theme_manager = theme_manager
@@ -84,17 +87,15 @@ class SidePanel(QWidget):
         layout.setSpacing(12)
 
         # --- Logo ---
-        logo_path = project_root / "assets" / "logo" / "logo-text.png"
+        logo_path = resource_path("ocr_medical/assets/logo/logo-text.png")
         logo_label = QLabel()
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
-            logo_label.setPixmap(logo_pixmap.scaledToWidth(
-                100, Qt.SmoothTransformation))
+            logo_label.setPixmap(logo_pixmap.scaledToWidth(100, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignLeft)
         layout.addWidget(logo_label)
 
-        layout.addItem(QSpacerItem(
-            0, 60, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        layout.addItem(QSpacerItem(0, 60, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
         # --- Navigation buttons ---
         self.buttons: dict[str, NavButton] = {}
@@ -107,10 +108,9 @@ class SidePanel(QWidget):
         ]
 
         for key, text, icon_file in pages:
-            icon_path = project_root / "assets" / "icon" / icon_file
+            icon_path = resource_path(f"ocr_medical/assets/icon/{icon_file}")
             nav_btn = NavButton(key, text, icon_path, theme_data)
-            nav_btn.btn.clicked.connect(
-                lambda checked, k=key: self.page_selected.emit(k))
+            nav_btn.btn.clicked.connect(lambda checked, k=key: self.page_selected.emit(k))
 
             layout.addWidget(nav_btn.widget())
             self.buttons[key] = nav_btn
@@ -118,12 +118,11 @@ class SidePanel(QWidget):
         layout.addStretch(1)
 
         # --- User info at bottom ---
-        user_icon_path = project_root / "assets" / "icon" / "user.svg"
+        user_icon_path = resource_path("ocr_medical/assets/icon/user.svg")
         user_icon_label = QLabel()
         if user_icon_path.exists():
             user_icon_label.setPixmap(
-                load_svg_colored(
-                    user_icon_path, theme_data["color"]["text"]["primary"], 24).pixmap(24, 24)
+                load_svg_colored(user_icon_path, theme_data["color"]["text"]["primary"], 24).pixmap(24, 24)
             )
         user_icon_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(user_icon_label)

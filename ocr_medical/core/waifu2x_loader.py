@@ -1,42 +1,78 @@
 import torch
+import json
+import logging
+from pathlib import Path
 from ocr_medical.core.status import status_manager
 
-def load_waifu2x(
-    # ---- Tham số quan trọng ----
-    model_type="art_scan",  # kiểu model:
-                            #   'art'       = tranh, anime, chữ (OCR thường chọn cái này)
-                            #   'photo'     = ảnh chụp
-                            #   'art_scan'  = scan giấy/tài liệu
+logger = logging.getLogger(__name__)
 
-    method="noise_scale",   # chế độ xử lý:
-                            #   'scale'        = chỉ phóng to
-                            #   'noise'        = chỉ khử nhiễu (không đổi size)
-                            #   'noise_sca  le'  = khử nhiễu + phóng to (thường dùng cho OCR)
-                            #   'auto_scale'   = tự động chọn scale theo input
-    
-    noise_level=3,  # mức khử nhiễu:
-                    #   -1 = tắt
-                    #    0 = none/very low
-                    #    1 = low
-                    #    2 = medium
-                    #    3 = high
-
-    scale=2,    # hệ số phóng to:
-                #   1 (no upscale), 1.6, 2, 4 (tuỳ model hỗ trợ)
-
-    # ---- Tối ưu hiệu năng ----
-    tile_size=64,       # chia ảnh thành tile 64/128/256/400/640 (VRAM thấp thì giảm)
-    batch_size=4,       # số tile xử lý song song (tăng khi có nhiều VRAM)
-    device_ids=[-1],    # [-1] = CPU, [0] = GPU, [0,1] = multi-GPU          
-    amp=True,           # True = dùng FP16 (tăng tốc, giảm VRAM); chỉ hoạt động trên GPU NVIDIA    
-
-
-    # ---- Đường dẫn ----
-    source="github",        # cho phép đổi sang 'local' nếu muốn
-    repo="nagadomi/nunif",  # đường dẫn repo local hoặc 'nagadomi/nunif' trên GitHub
-):
+# ============================================================
+#  Utility: Device selection
+# ============================================================
+def get_device_from_config():
+    """Chọn thiết bị dựa theo app_config.json (auto / cpu / cuda)."""
     try:
-        status_manager.add("🔄 Đang load model Waifu2x...")
+        config_path = Path(__file__).resolve().parent.parent / "config" / "app_config.json"
+        device_pref = "auto"
+
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                device_pref = cfg.get("device_preference", "auto").lower()
+
+        if device_pref == "cpu":
+            device = torch.device("cpu")
+            status_manager.add("⚙️ Running on CPU (forced by config)")
+        elif device_pref == "cuda":
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+                status_manager.add("🚀 Using GPU (CUDA) as configured")
+            else:
+                device = torch.device("cpu")
+                status_manager.add("⚠️ GPU not available. Falling back to CPU.")
+        else:  # auto
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device.type == "cuda":
+                status_manager.add("🚀 GPU detected — using CUDA for processing")
+            else:
+                status_manager.add("⚙️ No GPU found — using CPU")
+
+        logger.info(f"[Waifu2x] Selected device: {device}")
+        return device
+
+    except Exception as e:
+        logger.error(f"Error reading config for device selection: {e}")
+        status_manager.add("⚠️ Defaulting to CPU due to config error")
+        return torch.device("cpu")
+
+
+# ============================================================
+#  Main: Load Waifu2x model
+# ============================================================
+def load_waifu2x(
+    # ---- Model options ----
+    model_type="art_scan",     # 'art', 'photo', 'art_scan'
+    method="noise_scale",      # 'scale', 'noise', 'noise_scale', 'auto_scale'
+    noise_level=3,             # -1=off, 0=none, 1=low, 2=medium, 3=high
+    scale=2,                   # 1, 1.6, 2, 4
+
+    # ---- Performance options ----
+    tile_size=64,              # 64/128/256 (smaller for low VRAM)
+    batch_size=4,              # parallel tiles
+    amp=True,                  # use FP16 if available
+    source="github",           # model source
+    repo="nagadomi/nunif",     # repo or local model path
+):
+    """
+    Load the Waifu2x model dynamically via torch.hub with auto GPU/CPU selection.
+    """
+    try:
+        # Tự chọn thiết bị
+        device = get_device_from_config()
+        device_ids = [0] if device.type == "cuda" else [-1]
+
+        status_manager.add("🔄 Loading Waifu2x model...")
+
         upscaler = torch.hub.load(
             repo,
             'waifu2x',
@@ -50,8 +86,16 @@ def load_waifu2x(
             device_ids=device_ids,
             amp=amp
         )
-        status_manager.add("✅ Load model Waifu2x thành công")
+
+        # Nếu model hỗ trợ .to(device)
+        if hasattr(upscaler, "to"):
+            upscaler = upscaler.to(device)
+
+        status_manager.add(f"✅ Waifu2x model loaded successfully on {device.type.upper()}")
+        logger.info(f"[Waifu2x] Model ready on {device.type}")
         return upscaler
+
     except Exception as e:
-        status_manager.add(f"❌ Lỗi load model Waifu2x: {e}")
+        status_manager.add(f"❌ Failed to load Waifu2x model: {e}")
+        logger.error(f"[Waifu2x] Error: {e}")
         raise

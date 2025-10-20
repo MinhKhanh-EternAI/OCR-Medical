@@ -1,7 +1,9 @@
 from __future__ import annotations
-from pathlib import Path
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QStackedWidget, QFrame
+
+from pathlib import Path
 
 from ocr_medical.ui.widgets.side_panel import SidePanel
 from ocr_medical.ui.pages.home_page import HomePage
@@ -36,6 +38,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.project_root = project_root
         self.setWindowTitle("OCR-Medical")
+
+        logo_path = self.project_root / "assets" / "logo" / "logo.png"
+        if logo_path.exists():
+            self.setWindowIcon(QIcon(str(logo_path)))
 
         self.theme_manager = ThemeManager(theme_name)
         self.theme_manager.theme_changed.connect(self.apply_theme)
@@ -81,11 +87,12 @@ class MainWindow(QMainWindow):
 
         self._add_page("setting", SettingPage(self.theme_manager))
         self._add_page("file_log", FileLogPage(self.theme_manager))
-        
+
         extract_page = ExtraInfoPage(self.theme_manager)
-        extract_page.navigate_back_requested.connect(lambda: self.navigate_to("home"))
+        extract_page.navigate_back_requested.connect(
+            lambda: self.navigate_to("home"))
         self._add_page("extra_info", extract_page)
-        
+
         self._add_page("review", ReviewPage(self.theme_manager))
 
         self.side_panel.page_selected.connect(self.navigate_to)
@@ -96,11 +103,11 @@ class MainWindow(QMainWindow):
             self.theme_manager.get_theme_data(),
             self.theme_manager.get_theme_name()
         )
-        self.disable_focus_policy()
+
     def disable_focus_policy(self):
         """Disable focus policy cho toàn bộ ứng dụng"""
         self.set_focus_policy_recursive(self, Qt.NoFocus)
-    
+
     @staticmethod
     def set_focus_policy_recursive(widget, policy):
         """Recursively set focus policy cho tất cả children"""
