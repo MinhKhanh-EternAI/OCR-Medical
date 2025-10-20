@@ -1,330 +1,566 @@
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, 
-                                QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
-                                QMessageBox, QFrame, QDialog, QTabWidget, QTextEdit,
-                                QListWidget, QListWidgetItem, QComboBox, QDoubleSpinBox)
-from PySide6.QtCore import Qt, QSize, QMimeData
-from PySide6.QtGui import QAction, QColor, QClipboard, QGuiApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox,
+    QFrame, QDialog, QTextEdit, QComboBox, QWidget, QScrollArea
+)
+from PySide6.QtCore import Qt, QSize, QStandardPaths
+from PySide6.QtGui import QPixmap, QPainter, QMouseEvent
 from pathlib import Path
 import json
 from datetime import datetime
+import shutil
+import logging
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_svg_colored
+
+logger = logging.getLogger(__name__)
+ITEMS_PER_PAGE = 6
 
 
+# =====================================================
+# Image Compare Widget
+# =====================================================
+class ImageCompareWidget(QFrame):
+    """So sánh ảnh original / processed bằng thanh kéo"""
+    def __init__(self, original: Path, processed: Path):
+        super().__init__()
+        self.original = QPixmap(str(original)) if original and original.exists() else None
+        self.processed = QPixmap(str(processed)) if processed and processed.exists() else None
+        self.slider_pos = 0.5
+        self.setMinimumHeight(500)
+        self.setMouseTracking(True)
+        self.setObjectName("ImageCompare")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.white)
+        
+        if not (self.original and self.processed):
+            painter.setPen(Qt.gray)
+            painter.drawText(self.rect(), Qt.AlignCenter, "(Missing image files)")
+            return
+
+        size = self.size()
+        
+        # Scale images to fit while maintaining aspect ratio
+        ori_scaled = self.original.scaled(
+            size, 
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation
+        )
+        proc_scaled = self.processed.scaled(
+            size, 
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation
+        )
+        
+        # Center images
+        ori_x = (size.width() - ori_scaled.width()) // 2
+        ori_y = (size.height() - ori_scaled.height()) // 2
+        proc_x = (size.width() - proc_scaled.width()) // 2
+        proc_y = (size.height() - proc_scaled.height()) // 2
+        
+        split_x = int(size.width() * self.slider_pos)
+        
+        # Draw original image (left side)
+        painter.setClipRect(0, 0, split_x, size.height())
+        painter.drawPixmap(ori_x, ori_y, ori_scaled)
+        
+        # Draw processed image (right side)
+        painter.setClipRect(split_x, 0, size.width() - split_x, size.height())
+        painter.drawPixmap(proc_x, proc_y, proc_scaled)
+        
+        # Draw slider line
+        painter.setClipping(False)
+        painter.setPen(Qt.black)
+        painter.drawLine(split_x, 0, split_x, size.height())
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        self.slider_pos = max(0.0, min(1.0, event.position().x() / self.width()))
+        self.update()
+
+
+# =====================================================
+# Detail Dialog
+# =====================================================
 class FileDetailDialog(QDialog):
-    """Dialog hiển thị chi tiết folder"""
+    """Hiển thị ảnh và markdown song song với khả năng scroll"""
     def __init__(self, folder: Path, theme_data: dict, parent=None):
         super().__init__(parent)
         self.folder = folder
         self.theme_data = theme_data
         self.setWindowTitle(f"Details - {folder.name}")
-        self.setGeometry(100, 100, 700, 500)
+        self.resize(1200, 700)
+        self.setObjectName("FileDetailDialog")
+
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(16)
+
+        # Left Panel - Image Compare
+        left = QFrame()
+        left.setObjectName("LeftPanel")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
         
-        layout = QVBoxLayout(self)
+        lbl = QLabel("🖼️ Compare (Original ↔ Processed)")
+        lbl.setStyleSheet("font-weight: 700; font-size: 15px;")
+        left_layout.addWidget(lbl)
+
+        # Find images
+        ori = None
+        proc = None
         
-        # --- Info chung ---
-        info_frame = QFrame()
-        info_frame.setObjectName("InfoFrame")
-        info_layout = QHBoxLayout(info_frame)
+        original_dir = folder / "original"
+        processed_dir = folder / "processed"
         
-        info_text = QLabel(f"📁 {folder.name}")
-        info_text.setObjectName("InfoTitle")
-        info_layout.addWidget(info_text)
+        if original_dir.exists():
+            for ext in ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif']:
+                files = list(original_dir.glob(ext))
+                if files:
+                    ori = files[0]
+                    break
         
-        copy_btn = QPushButton("Copy Path")
-        copy_btn.setFixedWidth(100)
-        copy_btn.clicked.connect(self._copy_path)
-        info_layout.addStretch(1)
-        info_layout.addWidget(copy_btn)
+        if processed_dir.exists():
+            for ext in ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif']:
+                files = list(processed_dir.glob(ext))
+                if files:
+                    proc = files[0]
+                    break
+
+        # Image info
+        info_text = ""
+        if ori and ori.exists():
+            pixmap = QPixmap(str(ori))
+            size_mb = ori.stat().st_size / (1024 * 1024)
+            info_text = f"Original: {pixmap.width()}x{pixmap.height()}px, {size_mb:.2f}MB"
         
-        layout.addWidget(info_frame)
+        if proc and proc.exists():
+            pixmap = QPixmap(str(proc))
+            size_mb = proc.stat().st_size / (1024 * 1024)
+            if info_text:
+                info_text += " | "
+            info_text += f"Processed: {pixmap.width()}x{pixmap.height()}px, {size_mb:.2f}MB"
         
-        # --- Tab widget ---
-        tabs = QTabWidget()
+        if info_text:
+            info_label = QLabel(info_text)
+            info_label.setStyleSheet("color: #666; font-size: 12px;")
+            left_layout.addWidget(info_label)
+
+        # Scroll area for image
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        # Tab 1: Original
-        original_tab = QWidget()
-        original_layout = QVBoxLayout(original_tab)
-        original_dir = self.folder / "original"
-        original_layout.addWidget(self._create_files_list(original_dir))
-        tabs.addTab(original_tab, "Original")
+        self.img_cmp = ImageCompareWidget(ori, proc)
+        scroll.setWidget(self.img_cmp)
+        left_layout.addWidget(scroll, 1)
+
+        # Right Panel - Markdown Editor
+        right = QFrame()
+        right.setObjectName("RightPanel")
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        title = QLabel("📝 Extracted Markdown (Editable)")
+        title.setStyleSheet("font-weight: 700; font-size: 15px;")
+        right_layout.addWidget(title)
+
+        self.editor = QTextEdit()
+        self.editor.setObjectName("MarkdownEditor")
+        self.editor.setAcceptRichText(False)
+        self.editor.setStyleSheet("font-size: 14px; font-family: 'Consolas', 'Monaco', monospace;")
+        right_layout.addWidget(self.editor, 1)
+
+        self.save_btn = QPushButton("💾 Save Changes")
+        self.save_btn.setObjectName("SaveBtn")
+        self.save_btn.setCursor(Qt.PointingHandCursor)
+        self.save_btn.clicked.connect(self._save)
+        right_layout.addWidget(self.save_btn, alignment=Qt.AlignRight)
+
+        # Load markdown
+        self.text_path = None
+        text_dir = folder / "text"
+        if text_dir.exists():
+            md_files = list(text_dir.glob("*.md"))
+            if md_files:
+                self.text_path = md_files[0]
+                if self.text_path.exists():
+                    try:
+                        content = self.text_path.read_text(encoding="utf-8")
+                        self.editor.setPlainText(content)
+                    except Exception as e:
+                        logger.error(f"Error reading markdown: {e}")
+                        self.editor.setPlainText(f"Error loading file: {e}")
+
+        main_layout.addWidget(left, 5)
+        main_layout.addWidget(right, 5)
+
+    def _save(self):
+        if not self.text_path:
+            QMessageBox.warning(self, "Error", "Markdown file not found.")
+            return
         
-        # Tab 2: Processed
-        processed_tab = QWidget()
-        processed_layout = QVBoxLayout(processed_tab)
-        processed_dir = self.folder / "processed"
-        processed_layout.addWidget(self._create_files_list(processed_dir))
-        tabs.addTab(processed_tab, "Processed")
-        
-        # Tab 3: Text
-        text_tab = QWidget()
-        text_layout = QVBoxLayout(text_tab)
-        text_dir = self.folder / "text"
-        text_list = self._create_files_list(text_dir)
-        text_layout.addWidget(text_list)
-        
-        self.text_preview = QTextEdit()
-        self.text_preview.setReadOnly(True)
-        self.text_preview.setMaximumHeight(200)
-        text_layout.addWidget(QLabel("Preview:"))
-        text_layout.addWidget(self.text_preview)
-        
-        tabs.addTab(text_tab, "Text/Markdown")
-        
-        layout.addWidget(tabs)
-        
-        # --- Buttons ---
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch(1)
-        
-        open_btn = QPushButton("Open in Explorer")
-        open_btn.clicked.connect(self._open_folder)
-        btn_layout.addWidget(open_btn)
-        
-        delete_btn = QPushButton("Delete Folder")
-        delete_btn.setObjectName("DeleteBtn")
-        delete_btn.clicked.connect(self._delete_folder)
-        btn_layout.addWidget(delete_btn)
-        
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(close_btn)
-        
-        layout.addLayout(btn_layout)
-    
-    def _create_files_list(self, directory: Path) -> QListWidget:
-        """Tạo danh sách file"""
-        list_widget = QListWidget()
-        list_widget.setObjectName("FilesList")
-        
-        if not directory.exists():
-            item = QListWidgetItem("(Empty)")
-            item.setForeground(QColor("#999"))
-            list_widget.addItem(item)
-            return list_widget
-        
-        for file in sorted(directory.glob("*")):
-            if file.is_file():
-                size_kb = file.stat().st_size / 1024
-                size_text = f"{size_kb/1024:.2f} MB" if size_kb > 1024 else f"{size_kb:.0f} KB"
-                
-                item_text = f"{file.name} ({size_text})"
-                item = QListWidgetItem(item_text)
-                item.setData(Qt.UserRole, str(file))
-                list_widget.addItem(item)
-        
-        return list_widget
-    
-    def _copy_path(self):
-        clipboard = QGuiApplication.clipboard()
-        clipboard.setText(str(self.folder))
-        QMessageBox.information(self, "Copied", "Path copied to clipboard!")
-    
-    def _open_folder(self):
-        import os, platform
         try:
-            if platform.system() == "Windows":
-                os.startfile(self.folder)
-            elif platform.system() == "Darwin":
-                os.system(f"open '{self.folder}'")
-            else:
-                os.system(f"xdg-open '{self.folder}'")
+            self.text_path.write_text(self.editor.toPlainText(), encoding="utf-8")
+            QMessageBox.information(self, "Saved", "File saved successfully!")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Cannot open folder:\n{e}")
-    
-    def _delete_folder(self):
+            QMessageBox.critical(self, "Error", f"Failed to save file: {e}")
+
+
+# =====================================================
+# Folder Card
+# =====================================================
+class FolderCard(QFrame):
+    def __init__(self, folder: Path, theme_data: dict, project_root: Path, view_cb, del_cb):
+        super().__init__()
+        self.folder = folder
+        self.view_cb = view_cb
+        self.del_cb = del_cb
+        self.setObjectName("FolderCard")
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        # Header
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        
+        name = QLabel(folder.name)
+        name.setObjectName("FolderName")
+        name.setWordWrap(True)
+        head.addWidget(name, 1)
+        
+        status, color = self._get_status()
+        badge = QLabel(status)
+        badge.setObjectName("StatusBadge")
+        badge.setStyleSheet(f"background:{color}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;")
+        head.addWidget(badge)
+        layout.addLayout(head)
+
+        # Info
+        info = QHBoxLayout()
+        info.setSpacing(12)
+        info.addWidget(QLabel(f"📄 Files: {self._count()}"))
+        info.addWidget(QLabel(f"🕒 {self._time()}"))
+        info.addWidget(QLabel(f"📦 {self._size()}"))
+        info.addStretch()
+        layout.addLayout(info)
+
+        # Actions
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        btns.addStretch()
+        
+        view = QPushButton("View Details")
+        view.setObjectName("ViewBtn")
+        view.setCursor(Qt.PointingHandCursor)
+        view.clicked.connect(lambda: view_cb(folder))
+        
+        delete = QPushButton("Delete")
+        delete.setObjectName("DeleteBtn")
+        delete.setCursor(Qt.PointingHandCursor)
+        delete.clicked.connect(lambda: del_cb(folder))
+        
+        btns.addWidget(view)
+        btns.addWidget(delete)
+        layout.addLayout(btns)
+
+    def _get_status(self):
+        text_dir = self.folder / "text"
+        proc_dir = self.folder / "processed"
+        orig_dir = self.folder / "original"
+        
+        has_text = text_dir.exists() and any(text_dir.iterdir())
+        has_proc = proc_dir.exists() and any(proc_dir.iterdir())
+        has_orig = orig_dir.exists() and any(orig_dir.iterdir())
+        
+        if has_text and has_proc and has_orig:
+            return "Success", "#22C55E"
+        elif has_proc:
+            return "Partial", "#FB923C"
+        return "Pending", "#3B82F6"
+
+    def _count(self):
+        try:
+            return sum(1 for _ in self.folder.rglob("*") if _.is_file())
+        except Exception:
+            return 0
+
+    def _size(self):
+        try:
+            total_size = sum(f.stat().st_size for f in self.folder.rglob("*") if f.is_file())
+            return f"{total_size / (1024*1024):.2f} MB"
+        except Exception:
+            return "0.00 MB"
+
+    def _time(self):
+        try:
+            mtime = datetime.fromtimestamp(self.folder.stat().st_mtime)
+            return mtime.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return "Unknown"
+
+
+# =====================================================
+# FileLogPage
+# =====================================================
+class FileLogPage(BasePage):
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__("File Log", theme_manager, parent)
+        layout = self.layout()
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        self.project_root = Path(__file__).resolve().parent.parent.parent
+        self.output_dir = self._load_storage()
+        self.theme_data = theme_manager.get_theme_data()
+        self.all_folders = []
+        self.filtered = []
+        self.current_page = 1
+        self.search_text = ""
+
+        # === Top Bar ===
+        top = QHBoxLayout()
+        top.setSpacing(8)
+
+        self.search = QLineEdit()
+        self.search.setObjectName("SearchBar")
+        self.search.setPlaceholderText("Search folders...")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._on_search_changed)
+        top.addWidget(self.search, 3)
+
+        self.sort = QComboBox()
+        self.sort.setObjectName("SortBox")
+        self.sort.addItems(["Date (Newest)", "Date (Oldest)", "Name (A-Z)", "Name (Z-A)", "Size (Largest)", "Size (Smallest)"])
+        self.sort.currentTextChanged.connect(self._on_sort_changed)
+        self.sort.setCursor(Qt.PointingHandCursor)
+        top.addWidget(self.sort, 1)
+
+        self.refresh = QPushButton("Refresh")
+        self.refresh.setObjectName("RefreshBtn")
+        self.refresh.setCursor(Qt.PointingHandCursor)
+        self.refresh.clicked.connect(self.load_logs)
+        top.addWidget(self.refresh)
+        
+        layout.addLayout(top)
+
+        # === Summary ===
+        self.summary_label = QLabel()
+        self.summary_label.setObjectName("SummaryLabel")
+        self.summary_label.setStyleSheet("color: #666; font-size: 13px; padding: 4px 0;")
+        layout.addWidget(self.summary_label)
+
+        # === Cards Container ===
+        self.card_container = QWidget()
+        self.card_layout = QVBoxLayout(self.card_container)
+        self.card_layout.setSpacing(10)
+        self.card_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.card_container, 1)
+
+        # === Pagination ===
+        bottom = QHBoxLayout()
+        bottom.setSpacing(10)
+
+        self.page_info_label = QLabel()
+        self.page_info_label.setObjectName("PageInfo")
+        self.page_info_label.setStyleSheet("font-size: 13px; color: #666;")
+        bottom.addWidget(self.page_info_label)
+
+        bottom.addStretch()
+        
+        self.prev = QPushButton("◀ Previous")
+        self.prev.setObjectName("PageBtn")
+        self.prev.setCursor(Qt.PointingHandCursor)
+        self.prev.clicked.connect(self._prev_page)
+        bottom.addWidget(self.prev)
+
+        self.page_label = QLabel()
+        self.page_label.setObjectName("PageLbl")
+        self.page_label.setStyleSheet("font-weight: 600; font-size: 14px; padding: 0 12px;")
+        bottom.addWidget(self.page_label)
+
+        self.next = QPushButton("Next ▶")
+        self.next.setObjectName("PageBtn")
+        self.next.setCursor(Qt.PointingHandCursor)
+        self.next.clicked.connect(self._next_page)
+        bottom.addWidget(self.next)
+        
+        layout.addLayout(bottom)
+
+        # Load initial data
+        self.load_logs()
+
+    def _load_storage(self):
+        """Load storage directory từ config file (ưu tiên storage_path nếu có, ngược lại dùng AppData)"""
+        from PySide6.QtCore import QStandardPaths
+        cfg = self.project_root / "config" / "app_config.json"
+        try:
+            if cfg.exists():
+                with cfg.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    storage_path_str = data.get("storage_path", "").strip()
+                    if storage_path_str:
+                        custom_dir = Path(storage_path_str)
+                        if custom_dir.exists():
+                            logger.info(f"📁 Using custom storage path: {custom_dir}")
+                            return custom_dir
+                        else:
+                            logger.warning(f"⚠️ storage_path không tồn tại: {custom_dir}")
+            # fallback AppData
+            default = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "OCR-Medical" / "output"
+            default.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Using default AppData directory: {default}")
+            return default
+        except Exception as e:
+            logger.error(f"Error loading storage path: {e}")
+            fallback = Path.cwd() / "data" / "output"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
+
+    def load_logs(self):
+        """Load all folders from output directory"""
+        try:
+            self.all_folders = [f for f in self.output_dir.iterdir() if f.is_dir()]
+            self._apply_filters()
+        except Exception as e:
+            logger.error(f"Error loading logs: {e}")
+            self.all_folders = []
+            self.filtered = []
+            self._update_page()
+
+    def _on_search_changed(self, text: str):
+        """Handle search text change"""
+        self.search_text = text.lower().strip()
+        self.current_page = 1
+        self._apply_filters()
+
+    def _on_sort_changed(self):
+        """Handle sort option change"""
+        self._apply_filters()
+
+    def _apply_filters(self):
+        """Apply search and sort filters"""
+        # Apply search filter
+        if self.search_text:
+            self.filtered = [f for f in self.all_folders if self.search_text in f.name.lower()]
+        else:
+            self.filtered = self.all_folders.copy()
+        
+        # Apply sort
+        mode = self.sort.currentText()
+        try:
+            if "Date" in mode:
+                reverse = "Newest" in mode
+                self.filtered.sort(key=lambda f: f.stat().st_mtime, reverse=reverse)
+            elif "Name" in mode:
+                reverse = "Z-A" in mode
+                self.filtered.sort(key=lambda f: f.name.lower(), reverse=reverse)
+            elif "Size" in mode:
+                reverse = "Largest" in mode
+                self.filtered.sort(
+                    key=lambda f: sum(x.stat().st_size for x in f.rglob("*") if x.is_file()), 
+                    reverse=reverse
+                )
+        except Exception as e:
+            logger.error(f"Error sorting: {e}")
+        
+        self._update_page()
+
+    def _update_page(self):
+        """Update the current page display"""
+        # Clear existing cards
+        for i in reversed(range(self.card_layout.count())):
+            widget = self.card_layout.takeAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
+        total_items = len(self.filtered)
+        total_pages = max(1, (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        self.current_page = max(1, min(self.current_page, total_pages))
+        
+        start_idx = (self.current_page - 1) * ITEMS_PER_PAGE
+        end_idx = min(start_idx + ITEMS_PER_PAGE, total_items)
+
+        # Add cards for current page
+        if total_items > 0:
+            for folder in self.filtered[start_idx:end_idx]:
+                card = FolderCard(folder, self.theme_data, self.project_root, self._view_details, self._delete_folder)
+                self.card_layout.addWidget(card)
+        else:
+            # Show empty state
+            empty_label = QLabel("No folders found")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: #999; font-size: 16px; padding: 40px;")
+            self.card_layout.addWidget(empty_label)
+
+        # Add stretch at the end
+        self.card_layout.addStretch()
+
+        # Update labels
+        if total_items > 0:
+            self.page_label.setText(f"Page {self.current_page} of {total_pages}")
+            self.page_info_label.setText(f"Showing {start_idx + 1}-{end_idx} of {total_items} folders")
+            
+            total_size = sum(
+                sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+                for folder in self.filtered
+            )
+            self.summary_label.setText(
+                f"Total: {total_items} folders | {total_size / (1024*1024):.2f} MB"
+            )
+        else:
+            self.page_label.setText("Page 0 of 0")
+            self.page_info_label.setText("No folders to display")
+            self.summary_label.setText("Total: 0 folders | 0.00 MB")
+
+        # Update button states
+        self.prev.setEnabled(self.current_page > 1)
+        self.next.setEnabled(self.current_page < total_pages)
+
+    def _prev_page(self):
+        """Go to previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self._update_page()
+
+    def _next_page(self):
+        """Go to next page"""
+        total_pages = max(1, (len(self.filtered) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        if self.current_page < total_pages:
+            self.current_page += 1
+            self._update_page()
+
+    def _view_details(self, folder: Path):
+        """Open detail dialog for folder"""
+        try:
+            dialog = FileDetailDialog(folder, self.theme_data, self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening details: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to open details: {e}")
+
+    def _delete_folder(self, folder: Path):
+        """Delete folder with confirmation"""
         reply = QMessageBox.question(
-            self,
-            'Delete Folder',
-            f'Are you sure you want to delete "{self.folder.name}" and all its contents?',
+            self, 
+            "Confirm Delete", 
+            f"Are you sure you want to delete '{folder.name}'?\nThis action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
-                import shutil
-                shutil.rmtree(self.folder)
-                QMessageBox.information(self, "Deleted", "Folder deleted successfully!")
-                self.accept()
+                shutil.rmtree(folder, ignore_errors=True)
+                QMessageBox.information(self, "Deleted", f"Folder '{folder.name}' has been deleted.")
+                self.load_logs()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete:\n{e}")
-
-
-class FileLogPage(BasePage):
-    """
-    Trang hiển thị lịch sử các file đã xử lý
-    """
-    def __init__(self, theme_manager: ThemeManager, parent=None) -> None:
-        super().__init__("File Log", theme_manager, parent)
-        layout = self.layout()
-        
-        self.project_root = Path(__file__).resolve().parent.parent.parent
-        self.output_dir = self.project_root / "data" / "output"
-        self.theme_data = theme_manager.get_theme_data()
-
-        # --- Search & Filter ---
-        search_layout = QHBoxLayout()
-        
-        self.search_bar = QLineEdit()
-        self.search_bar.setObjectName("SearchBar")
-        self.search_bar.setPlaceholderText("Search files, content...")
-        self.search_bar.textChanged.connect(self._on_search)
-        
-        icon_path = self.project_root / "assets" / "icon" / "search.svg"
-        if icon_path.exists():
-            search_icon = load_svg_colored(icon_path, self.theme_data["color"]["text"]["placeholder"], 16)
-            action = QAction(search_icon, "", self.search_bar)
-            self.search_bar.addAction(action, QLineEdit.LeadingPosition)
-        
-        search_layout.addWidget(self.search_bar)
-        
-        # --- Sort dropdown ---
-        sort_label = QLabel("Sort by:")
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Date (Newest)", "Date (Oldest)", "Name (A-Z)", "Name (Z-A)", "Size (Large)"])
-        self.sort_combo.currentTextChanged.connect(self._on_sort_changed)
-        search_layout.addWidget(sort_label)
-        search_layout.addWidget(self.sort_combo)
-        
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setObjectName("RefreshButton")
-        refresh_btn.clicked.connect(self.load_logs)
-        refresh_btn.setFixedWidth(80)
-        search_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(search_layout)
-
-        # --- Stats ---
-        self.stats_label = QLabel()
-        self.stats_label.setObjectName("StatsLabel")
-        layout.addWidget(self.stats_label)
-
-        # --- Table ---
-        self.table = QTableWidget()
-        self.table.setObjectName("LogTable")
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels([
-            "File Name", "Size", "Processed Time", 
-            "Status", "Files", "Actions"
-        ])
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        
-        layout.addWidget(self.table)
-
-        self.load_logs()
-
-    def load_logs(self):
-        self.table.setRowCount(0)
-        
-        if not self.output_dir.exists():
-            self.stats_label.setText("No output directory found")
-            return
-        
-        folders = [d for d in self.output_dir.iterdir() if d.is_dir()]
-        total = len(folders)
-        success = 0
-        
-        for folder in folders:
-            text_dir = folder / "text"
-            processed_dir = folder / "processed"
-            original_dir = folder / "original"
-            
-            has_original = original_dir.exists() and any(original_dir.glob("*"))
-            has_text = text_dir.exists() and any(text_dir.glob("*.md"))
-            has_processed = processed_dir.exists() and any(processed_dir.glob("*.png"))
-            
-            if has_text and has_processed and has_original:
-                success += 1
-                status = "Success"
-                status_color = "#4CAF50"
-            elif has_processed:
-                status = "Partial"
-                status_color = "#FF9800"
-            else:
-                status = "Pending"
-                status_color = "#2196F3"
-            
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            
-            # File name
-            self.table.setItem(row, 0, QTableWidgetItem(folder.name))
-            
-            # Size
-            try:
-                total_size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
-                size_mb = total_size / (1024 * 1024)
-                size_text = f"{size_mb:.2f} MB"
-            except:
-                size_text = "--"
-            self.table.setItem(row, 1, QTableWidgetItem(size_text))
-            
-            # Time
-            try:
-                mtime = folder.stat().st_mtime
-                time_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-            except:
-                time_str = "--"
-            self.table.setItem(row, 2, QTableWidgetItem(time_str))
-            
-            # Status
-            status_item = QTableWidgetItem(status)
-            status_item.setForeground(QColor(status_color))
-            self.table.setItem(row, 3, status_item)
-            
-            # Files count
-            count_text = f"O:{1 if has_original else 0} P:{1 if has_processed else 0} T:{1 if has_text else 0}"
-            self.table.setItem(row, 4, QTableWidgetItem(count_text))
-            
-            # Actions
-            view_btn = QPushButton("View")
-            view_btn.setObjectName("ViewButton")
-            view_btn.setFixedWidth(70)
-            view_btn.clicked.connect(lambda checked, f=folder: self._view_details(f))
-            self.table.setCellWidget(row, 5, view_btn)
-        
-        self.stats_label.setText(f"Total: {total} | ✅ Success: {success} | ❌ Failed: {total - success}")
-
-    def _on_search(self, text: str):
-        text = text.lower().strip()
-        
-        for row in range(self.table.rowCount()):
-            filename = self.table.item(row, 0).text().lower()
-            visible = not text or text in filename
-            self.table.setRowHidden(row, not visible)
-
-    def _on_sort_changed(self, sort_type: str):
-        """Sắp xếp bảng"""
-        rows = []
-        for row in range(self.table.rowCount()):
-            if not self.table.isRowHidden(row):
-                rows.append(row)
-        
-        # Simple sort (có thể mở rộng)
-        if "Name (A-Z)" in sort_type:
-            rows.sort(key=lambda r: self.table.item(r, 0).text())
-        elif "Name (Z-A)" in sort_type:
-            rows.sort(key=lambda r: self.table.item(r, 0).text(), reverse=True)
-        
-        # Refresh hiển thị (có thể tối ưu hơn)
-        self.load_logs()
-
-    def _view_details(self, folder: Path):
-        dialog = FileDetailDialog(folder, self.theme_data, self)
-        if dialog.exec() == QDialog.Accepted:
-            # Refresh nếu folder bị xóa
-            self.load_logs()
+                logger.error(f"Error deleting folder: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to delete folder: {e}")

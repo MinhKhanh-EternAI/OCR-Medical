@@ -165,19 +165,21 @@ class BasePage(QWidget):
 
 ```python
 from __future__ import annotations
+
 from PySide6.QtWidgets import (
     QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QFrame,
-    QStackedWidget, QScrollArea, QWidget, QTextBrowser
+    QStackedWidget, QScrollArea, QWidget, QTextBrowser, QSizePolicy, QTextEdit, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal, QSize, QThread
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QMovie
 from pathlib import Path
 import logging
+import markdown
+import json
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
 from ocr_medical.ui.style.style_loader import load_svg_colored
-from ocr_medical.core.pipeline import process_input
 
 logger = logging.getLogger(__name__)
 
@@ -187,104 +189,230 @@ logger = logging.getLogger(__name__)
 # =====================================================
 class OCRWorker(QThread):
     """Worker thread để xử lý OCR không block UI"""
-    
+
     progress = Signal(int, str)  # (index, status)
+    step_progress = Signal(int, str)  # (index, step: "load_model", "process_image", "extract_info", "success")
     result = Signal(int, str, str)  # (index, markdown_text, image_path)
     finished = Signal()
-    error = Signal(int, str)  # (index, error_message)
-    
-    def __init__(self, files: list[Path], output_root: Path):
+    error = Signal(int, str)
+    stopped = Signal()  # Signal khi bị dừng
+
+    def __init__(self, files: list[Path], output_root: Path, page_instance=None, file_indices: list[int] = None):
         super().__init__()
         self.files = files
         self.output_root = output_root
+        self.page_instance = page_instance
+        self.file_indices = file_indices  # Danh sách index của file cần xử lý
         self._is_running = True
-    
+        self._force_stop = False  # Flag để dừng ngay lập tức
+
     def run(self):
-        """Xử lý từng file"""
-        for idx, file_path in enumerate(self.files):
-            if not self._is_running:
-                break
-            
-            try:
-                # Update status: processing
-                self.progress.emit(idx, "processing")
-                
-                # Process với pipeline
-                logger.info(f"Processing file {idx + 1}/{len(self.files)}: {file_path.name}")
-                process_input(str(file_path), str(self.output_root))
-                
-                # Đọc kết quả markdown
-                img_name = file_path.stem
-                md_path = self.output_root / img_name / "text" / f"{img_name}_processed.md"
-                processed_img = self.output_root / img_name / "processed" / f"{img_name}_processed.png"
-                
-                markdown_text = ""
-                if md_path.exists():
-                    markdown_text = md_path.read_text(encoding="utf-8")
-                
-                # Emit result
-                self.result.emit(idx, markdown_text, str(processed_img))
-                self.progress.emit(idx, "completed")
-                
-            except Exception as e:
-                logger.error(f"Error processing {file_path.name}: {e}")
-                self.error.emit(idx, str(e))
-                self.progress.emit(idx, "failed")
+        from ocr_medical.core.waifu2x_loader import load_waifu2x
+        from ocr_medical.core.process_image import process_image
+        from ocr_medical.core.ocr_extract import call_qwen_ocr
+        from PIL import Image
         
-        self.finished.emit()
-    
+        try:
+            # Xác định danh sách file cần xử lý
+            if self.file_indices:
+                files_to_process = [(idx, self.files[idx]) for idx in self.file_indices]
+            else:
+                files_to_process = list(enumerate(self.files))
+            
+            # Bước 1: Load model Waifu2x (chỉ load 1 lần)
+            if len(files_to_process) > 0 and self._is_running:
+                first_idx = files_to_process[0][0]
+                self.step_progress.emit(first_idx, "load_model")
+                upscaler = load_waifu2x()
+            
+            if not self._is_running:
+                self.stopped.emit()
+                return
+            
+            for i, (idx, file_path) in enumerate(files_to_process):
+                # Kiểm tra force stop ở đầu mỗi vòng lặp
+                if self._force_stop or not self._is_running:
+                    logger.info(f"OCR stopped at file {idx}")
+                    self.stopped.emit()
+                    return
+                
+                try:
+                    self.progress.emit(idx, "processing")
+                    logger.info(f"Processing file {idx + 1}/{len(self.files)}: {file_path.name}")
+                    
+                    # Nếu không phải file đầu tiên, vẫn emit load_model nhưng nhanh hơn
+                    if i > 0 and self._is_running:
+                        self.step_progress.emit(idx, "load_model")
+                        self.msleep(300)
+                    
+                    if not self._is_running:
+                        self.stopped.emit()
+                        return
+                    
+                    # Bước 2: Process image (upscale)
+                    self.step_progress.emit(idx, "process_image")
+                    img = Image.open(file_path).convert("RGB")
+                    img_name = file_path.stem
+                    _, processed_path = process_image(upscaler, img, img_name, self.output_root)
+                    
+                    if not self._is_running:
+                        self.stopped.emit()
+                        return
+                    
+                    # Bước 3: Extract information (OCR)
+                    self.step_progress.emit(idx, "extract_info")
+                    from ocr_medical.core.pipeline import DEFAULT_PROMPT
+                    out_dir_text = self.output_root / img_name / "text"
+                    out_dir_text.mkdir(parents=True, exist_ok=True)
+                    
+                    extracted = call_qwen_ocr(str(processed_path), DEFAULT_PROMPT)
+                    
+                    if not self._is_running:
+                        self.stopped.emit()
+                        return
+                    
+                    md_path = out_dir_text / f"{img_name}_processed.md"
+                    with open(md_path, "w", encoding="utf-8") as f:
+                        f.write(extracted)
+
+                    markdown_text = extracted
+                    processed_img = self.output_root / img_name / "processed" / f"{img_name}_processed.png"
+
+                    # Bước 4: Success
+                    self.step_progress.emit(idx, "success")
+                    self.msleep(1500)  # Hiển thị success 1.5 giây
+                    
+                    if not self._is_running:
+                        self.stopped.emit()
+                        return
+                    
+                    self.result.emit(idx, markdown_text, str(processed_img))
+                    self.progress.emit(idx, "completed")
+
+                except Exception as e:
+                    if not self._is_running:
+                        self.stopped.emit()
+                        return
+                    self.error.emit(idx, str(e))
+                    self.progress.emit(idx, "failed")
+                    logger.error(f"Error processing file {idx}: {str(e)}")
+
+            self.finished.emit()
+            
+        except Exception as e:
+            logger.error(f"OCR Worker crashed: {str(e)}")
+            self.stopped.emit()
+
     def stop(self):
-        """Dừng worker"""
+        """Dừng worker một cách an toàn"""
         self._is_running = False
+        self._force_stop = True
+        logger.info("OCR Worker stop requested")
+    
+    def terminate_worker(self):
+        """Buộc dừng worker ngay lập tức (sử dụng trong trường hợp khẩn cấp)"""
+        self._force_stop = True
+        self._is_running = False
+        self.terminate()  # Force terminate thread
+        logger.warning("OCR Worker force terminated")
 
 
 # =====================================================
-#             File Row Item (with status update)
+#           File Row Item (Clickable)
 # =====================================================
 class FileRowItem(QFrame):
-    """Một hàng trong danh sách file: index, file name, status"""
-    
+    clicked = Signal(int)
+    reload_requested = Signal(int)
+
     def __init__(self, index: int, file_name: str, state: str, project_root: Path):
         super().__init__()
         self.setObjectName("FileRowItem")
         self.project_root = project_root
+        self.index = index - 1
         self.current_state = state
 
-        self.layout_main = QHBoxLayout(self)
-        self.layout_main.setContentsMargins(12, 6, 12, 6)
-        self.layout_main.setSpacing(0)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(8)
 
-        # ----- Column 1: Index -----
-        self.index_lbl = QLabel(str(index))
-        self.index_lbl.setObjectName("FileIndex")
-        self.index_lbl.setAlignment(Qt.AlignCenter)
-        self.layout_main.addWidget(self.index_lbl, 1)
+        # Cột 1: index - căn giữa (width: 50px)
+        idx_container = QWidget()
+        idx_container.setFixedWidth(50)
+        idx_layout = QHBoxLayout(idx_container)
+        idx_layout.setContentsMargins(0, 0, 0, 0)
+        idx_layout.setAlignment(Qt.AlignCenter)
+        idx_lbl = QLabel(str(index))
+        idx_lbl.setAlignment(Qt.AlignCenter)
+        idx_layout.addWidget(idx_lbl)
+        layout.addWidget(idx_container)
 
-        # ----- Column 2: File Name -----
-        self.name_lbl = QLabel(file_name)
-        self.name_lbl.setObjectName("FileName")
-        self.layout_main.addWidget(self.name_lbl, 5)
+        # Cột 2: tên file - căn trái
+        name_lbl = QLabel(file_name)
+        name_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        layout.addWidget(name_lbl, 1)
 
-        # ----- Column 3: Status -----
+        # Cột 3: trạng thái - căn trái (width: 150px)
         self.status_container = QWidget()
+        self.status_container.setFixedWidth(150)
         self.status_layout = QHBoxLayout(self.status_container)
         self.status_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_layout.setSpacing(4)
-        self.layout_main.addWidget(self.status_container, 3)
+        layout.addWidget(self.status_container)
+
+        # Cột 4: action - căn giữa (width: 80px)
+        action_container = QWidget()
+        action_container.setFixedWidth(80)
+        action_layout = QHBoxLayout(action_container)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setAlignment(Qt.AlignCenter)
         
+        self.reload_btn = QPushButton()
+        self.reload_btn.setObjectName("ReloadButton")
+        self.reload_btn.setFlat(True)
+        self.reload_btn.setFixedSize(24, 24)
+        self.reload_btn.setFocusPolicy(Qt.NoFocus)
+        self.reload_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                padding: 0;
+            }
+            QPushButton:hover:!disabled {
+                background: rgba(107, 114, 128, 0.1);
+                border-radius: 4px;
+            }
+            QPushButton:disabled {
+                opacity: 0.5;
+            }
+        """)
+        
+        reload_icon_path = self.project_root / "assets" / "icon" / "reload.svg"
+        if reload_icon_path.exists():
+            reload_icon = load_svg_colored(reload_icon_path, "#6B7280", 16)
+            self.reload_btn.setIcon(reload_icon)
+            self.reload_btn.setIconSize(QSize(16, 16))
+        
+        self.reload_btn.clicked.connect(lambda: self.reload_requested.emit(self.index))
+        action_layout.addWidget(self.reload_btn)
+        layout.addWidget(action_container)
+
         self.update_status(state)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Chỉ emit clicked nếu không click vào reload button
+            if not self.reload_btn.geometry().contains(event.pos()):
+                self.clicked.emit(self.index)
+        super().mousePressEvent(event)
 
     def update_status(self, state: str):
-        """Cập nhật trạng thái hiển thị"""
+        """Cập nhật hiển thị trạng thái"""
         self.current_state = state
-        
-        # Clear old widgets
         while self.status_layout.count():
             item = self.status_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        # Create new status display
+
         color_map = {
             "waiting": ("#A0A0A0", "Waiting"),
             "processing": ("#FB923C", "Processing"),
@@ -292,711 +420,1419 @@ class FileRowItem(QFrame):
             "failed": ("#EF4444", "Failed"),
         }
         color, text = color_map.get(state, ("#A0A0A0", "Waiting"))
-
         icon_path = self.project_root / "assets" / "icon" / "circle.svg"
         icon = load_svg_colored(icon_path, color, 10)
 
         icon_lbl = QLabel()
         icon_lbl.setPixmap(icon.pixmap(10, 10))
         icon_lbl.setFixedWidth(14)
-
-        text_lbl = QLabel(text)
-        text_lbl.setStyleSheet(f"color: {color}; font-weight: 500;")
+        txt_lbl = QLabel(text)
+        txt_lbl.setStyleSheet(f"color: {color}; font-weight: 500;")
 
         self.status_layout.addWidget(icon_lbl)
-        self.status_layout.addWidget(text_lbl)
+        self.status_layout.addWidget(txt_lbl)
         self.status_layout.addStretch()
+        
+        # Vô hiệu hóa nút reload khi đang xử lý
+        if state == "processing":
+            self.reload_btn.setEnabled(False)
+            self.reload_btn.setCursor(Qt.ForbiddenCursor)
+        else:
+            self.reload_btn.setEnabled(True)
+            self.reload_btn.setCursor(Qt.PointingHandCursor)
 
 
 # =====================================================
-#                 Extract Info Page
+#              Extract Info Page
 # =====================================================
 class ExtraInfoPage(BasePage):
     navigate_back_requested = Signal()
-    
+
     def __init__(self, theme_manager: ThemeManager, parent=None):
         super().__init__("Extraction Info", theme_manager, parent)
-
         self.theme_manager = theme_manager
         self.theme_data = theme_manager.get_theme_data()
         self.project_root = Path(__file__).resolve().parent.parent.parent
 
         self.files = []
+        self.output_root = None
         self.file_items = []
+        self.results_cache = {}
+        self.file_status = {}
+        self.file_md_paths = {}
         self.worker = None
         self.current_preview_index = 0
+        
+        # Load storage directory từ config
+        self.storage_dir = self._load_storage_dir()
 
         layout = self.layout()
         layout.setSpacing(6)
 
-        # =====================================================
-        #                     HEADER
-        # =====================================================
+        # ================= HEADER =================
         layout.removeWidget(self.header)
         layout.removeWidget(self.divider)
-
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-        header_layout.addWidget(self.header, stretch=1)
-
+        header_layout.addWidget(self.header, 1)
         layout.insertLayout(0, header_layout)
         layout.insertWidget(1, self.divider)
 
-        # =====================================================
-        #                     BODY
-        # =====================================================
+        # ================= BODY =================
         body_container = QFrame()
         body_container.setObjectName("BodyContainer")
         body_layout = QHBoxLayout(body_container)
         body_layout.setSpacing(12)
         body_layout.setContentsMargins(4, 6, 4, 0)
 
-        # ---------------- LEFT PANEL ----------------
+        # -------- LEFT PANEL --------
         left_panel = QFrame()
         left_panel.setObjectName("LeftPanel")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        title_left = QLabel("File Preview")
-        title_left.setObjectName("SectionLabel")
-        left_layout.addWidget(title_left)
+        lbl = QLabel("File Preview")
+        lbl.setObjectName("SectionLabel")
+        left_layout.addWidget(lbl)
 
         self.preview_box = QLabel()
         self.preview_box.setObjectName("PreviewBox")
         self.preview_box.setAlignment(Qt.AlignCenter)
         self.preview_box.setScaledContents(False)
-        self.preview_box.setFixedSize(600, 400)  # ✅ Kích thước cố định
-
-        no_img_path = self.project_root / "assets" / "icon" / "no_image.svg"
-        if no_img_path.exists():
-            icon = load_svg_colored(no_img_path, self.theme_data["color"]["text"]["muted"], 100)
+        self.preview_box.setMinimumSize(300, 200)
+        self.preview_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        no_img = self.project_root / "assets" / "icon" / "no_image.svg"
+        if no_img.exists():
+            icon = load_svg_colored(no_img, self.theme_data["color"]["text"]["muted"], 100)
             self.preview_box.setPixmap(icon.pixmap(QSize(100, 100)))
         left_layout.addWidget(self.preview_box, 4)
 
-        # ---------- FILE LIST ----------
-        file_list_frame = QFrame()
-        file_list_frame.setObjectName("FileListFrame")
-        file_list_layout = QVBoxLayout(file_list_frame)
-        file_list_layout.setContentsMargins(0, 0, 0, 0)
-        file_list_layout.setSpacing(0)
+        # ---- File list ----
+        file_frame = QFrame()
+        file_frame.setObjectName("FileListFrame")
+        file_layout = QVBoxLayout(file_frame)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.setSpacing(0)
 
-        # Header
         header_row = QFrame()
         header_row.setObjectName("FileListHeader")
         h_layout = QHBoxLayout(header_row)
         h_layout.setContentsMargins(12, 6, 12, 6)
-        h_layout.setSpacing(0)
+        h_layout.setSpacing(8)
+        
+        idx_header_container = QWidget()
+        idx_header_container.setFixedWidth(50)
+        idx_header_layout = QHBoxLayout(idx_header_container)
+        idx_header_layout.setContentsMargins(0, 0, 0, 0)
+        idx_header_layout.setAlignment(Qt.AlignCenter)
+        idx_header = QLabel("#")
+        idx_header.setAlignment(Qt.AlignCenter)
+        idx_header_layout.addWidget(idx_header)
+        h_layout.addWidget(idx_header_container)
+        
+        name_header = QLabel("File Name")
+        name_header.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        h_layout.addWidget(name_header, 1)
+        
+        status_header_container = QWidget()
+        status_header_container.setFixedWidth(150)
+        status_header_layout = QHBoxLayout(status_header_container)
+        status_header_layout.setContentsMargins(0, 0, 0, 0)
+        status_header = QLabel("Status")
+        status_header.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        status_header_layout.addWidget(status_header)
+        h_layout.addWidget(status_header_container)
+        
+        action_header_container = QWidget()
+        action_header_container.setFixedWidth(80)
+        action_header_layout = QHBoxLayout(action_header_container)
+        action_header_layout.setContentsMargins(0, 0, 0, 0)
+        action_header_layout.setAlignment(Qt.AlignCenter)
+        action_header = QLabel("Action")
+        action_header.setAlignment(Qt.AlignCenter)
+        action_header_layout.addWidget(action_header)
+        h_layout.addWidget(action_header_container)
+        
+        file_layout.addWidget(header_row)
 
-        col1 = QLabel("#")
-        col1.setAlignment(Qt.AlignCenter)
-        h_layout.addWidget(col1, 1)
-
-        col2 = QLabel("File Name")
-        col2.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        h_layout.addWidget(col2, 5)
-
-        col3 = QLabel("Status")
-        col3.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        h_layout.addWidget(col3, 3)
-
-        file_list_layout.addWidget(header_row)
-
-        # Scroll chứa các dòng
         self.file_scroll = QScrollArea()
         self.file_scroll.setObjectName("FileScroll")
         self.file_scroll.setWidgetResizable(True)
-
         self.file_container = QWidget()
         self.file_container.setObjectName("FileListContainer")
-
         self.file_container_layout = QVBoxLayout(self.file_container)
-        self.file_container_layout.setContentsMargins(0, 0, 0, 0)
-        self.file_container_layout.setSpacing(0)
         self.file_container_layout.setAlignment(Qt.AlignTop)
-
+        self.file_container_layout.setContentsMargins(0, 0, 0, 0)
         self.file_scroll.setWidget(self.file_container)
-        file_list_layout.addWidget(self.file_scroll)
+        file_layout.addWidget(self.file_scroll)
+        left_layout.addWidget(file_frame, 2)
 
-        left_layout.addWidget(file_list_frame, 2)
-
-        # ---------------- RIGHT PANEL ----------------
+        # -------- RIGHT PANEL --------
         right_panel = QFrame()
         right_panel.setObjectName("RightPanel")
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
 
-        title_right = QLabel("Result Display")
-        title_right.setObjectName("SectionLabel")
-        right_layout.addWidget(title_right)
+        lbl = QLabel("Result Display")
+        lbl.setObjectName("SectionLabel")
+        right_layout.addWidget(lbl)
 
+        # Tabs
         tab_container = QFrame()
         tab_container.setObjectName("TabContainer")
         tab_layout = QVBoxLayout(tab_container)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.setSpacing(0)
 
-        tab_buttons_layout = QHBoxLayout()
-        tab_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        tab_buttons_layout.setSpacing(0)
-
+        # Tab buttons
+        tab_btns = QHBoxLayout()
+        tab_btns.setSpacing(0)
         self.tab1_btn = QPushButton("Markdown Render Preview")
         self.tab2_btn = QPushButton("Markdown Raw Text")
-
         for btn in (self.tab1_btn, self.tab2_btn):
             btn.setObjectName("TabButton")
-            btn.setCursor(Qt.PointingHandCursor)  # ✅ Hand cursor
             btn.setCheckable(True)
             btn.setFlat(True)
-            btn.setMinimumHeight(32)
-            tab_buttons_layout.addWidget(btn, 1)
-
+            btn.setCursor(Qt.PointingHandCursor)
+            tab_btns.addWidget(btn, 1)
         self.tab1_btn.setChecked(True)
-        tab_layout.addLayout(tab_buttons_layout)
+        tab_layout.addLayout(tab_btns)
 
         self.tab_stack = QStackedWidget()
+
+        # ---- Tab 1: Markdown render ----
+        tab1 = QFrame()
+        tab1.setObjectName("ResultBox")
+        t1_layout = QVBoxLayout(tab1)
+        t1_layout.setContentsMargins(0, 0, 0, 0)
+        t1_layout.setSpacing(0)
+
+        # Tạo stacked widget cho tab 1
+        self.tab1_stack = QStackedWidget()
         
-        # Tab 1: Rendered Markdown
+        # Page 1: Empty state
+        empty_page_tab1 = QWidget()
+        empty_layout_tab1 = QVBoxLayout(empty_page_tab1)
+        empty_layout_tab1.setContentsMargins(0, 0, 0, 0)
+        self.empty_state_tab1 = QLabel("No content yet. Start processing to see results.")
+        self.empty_state_tab1.setObjectName("EmptyStateLabel")
+        self.empty_state_tab1.setAlignment(Qt.AlignCenter)
+        empty_layout_tab1.addWidget(self.empty_state_tab1)
+        self.tab1_stack.addWidget(empty_page_tab1)
+
+        # Page 2: Processing state
+        processing_page_tab1 = QWidget()
+        processing_layout_main_tab1 = QVBoxLayout(processing_page_tab1)
+        processing_layout_main_tab1.setContentsMargins(0, 0, 0, 0)
+        self.processing_container_tab1 = QFrame()
+        self.processing_container_tab1.setObjectName("ProcessingContainer")
+        processing_layout_tab1 = QVBoxLayout(self.processing_container_tab1)
+        processing_layout_tab1.setAlignment(Qt.AlignCenter)
+        processing_layout_tab1.setSpacing(10)
+        
+        self.processing_gif_tab1 = QLabel()
+        self.processing_gif_tab1.setAlignment(Qt.AlignCenter)
+        processing_layout_tab1.addWidget(self.processing_gif_tab1)
+        
+        self.processing_text_tab1 = QLabel()
+        self.processing_text_tab1.setAlignment(Qt.AlignCenter)
+        self.processing_text_tab1.setStyleSheet("font-size: 16px; font-weight: 500;")
+        processing_layout_tab1.addWidget(self.processing_text_tab1)
+        
+        processing_layout_main_tab1.addWidget(self.processing_container_tab1, alignment=Qt.AlignCenter)
+        self.tab1_stack.addWidget(processing_page_tab1)
+
+        # Page 3: Content preview
+        content_page_tab1 = QWidget()
+        content_layout_tab1 = QVBoxLayout(content_page_tab1)
+        content_layout_tab1.setContentsMargins(0, 0, 0, 0)
         self.markdown_preview = QTextBrowser()
-        self.markdown_preview.setObjectName("ResultBox")
-        self.markdown_preview.setMarkdown("_No content yet. Start processing to see results._")
+        self.markdown_preview.setObjectName("ResultContent")
+        content_layout_tab1.addWidget(self.markdown_preview)
+        self.tab1_stack.addWidget(content_page_tab1)
         
-        # Tab 2: Raw Text
-        self.raw_text_area = QTextBrowser()
-        self.raw_text_area.setObjectName("ResultBox")
-        self.raw_text_area.setPlainText("No content yet. Start processing to see results.")
+        t1_layout.addWidget(self.tab1_stack)
+        self.tab_stack.addWidget(tab1)
+
+        # ---- Tab 2: Raw text ----
+        tab2 = QFrame()
+        tab2.setObjectName("ResultBox")
+        t2_layout = QVBoxLayout(tab2)
+        t2_layout.setContentsMargins(0, 0, 0, 0)
+        t2_layout.setSpacing(0)
+
+        # Tạo stacked widget cho tab 2
+        self.tab2_stack = QStackedWidget()
         
-        self.tab_stack.addWidget(self.markdown_preview)
-        self.tab_stack.addWidget(self.raw_text_area)
+        # Page 1: Empty state
+        empty_page_tab2 = QWidget()
+        empty_layout_tab2 = QVBoxLayout(empty_page_tab2)
+        empty_layout_tab2.setContentsMargins(0, 0, 0, 0)
+        self.empty_state_tab2 = QLabel("No content yet. Start processing to see results.")
+        self.empty_state_tab2.setObjectName("EmptyStateLabel")
+        self.empty_state_tab2.setAlignment(Qt.AlignCenter)
+        empty_layout_tab2.addWidget(self.empty_state_tab2)
+        self.tab2_stack.addWidget(empty_page_tab2)
+
+        # Page 2: Processing state
+        processing_page_tab2 = QWidget()
+        processing_layout_main_tab2 = QVBoxLayout(processing_page_tab2)
+        processing_layout_main_tab2.setContentsMargins(0, 0, 0, 0)
+        self.processing_container_tab2 = QFrame()
+        self.processing_container_tab2.setObjectName("ProcessingContainer")
+        processing_layout_tab2 = QVBoxLayout(self.processing_container_tab2)
+        processing_layout_tab2.setAlignment(Qt.AlignCenter)
+        processing_layout_tab2.setSpacing(10)
+        
+        self.processing_gif_tab2 = QLabel()
+        self.processing_gif_tab2.setAlignment(Qt.AlignCenter)
+        processing_layout_tab2.addWidget(self.processing_gif_tab2)
+        
+        self.processing_text_tab2 = QLabel()
+        self.processing_text_tab2.setAlignment(Qt.AlignCenter)
+        self.processing_text_tab2.setStyleSheet("font-size: 16px; font-weight: 500;")
+        processing_layout_tab2.addWidget(self.processing_text_tab2)
+        
+        processing_layout_main_tab2.addWidget(self.processing_container_tab2, alignment=Qt.AlignCenter)
+        self.tab2_stack.addWidget(processing_page_tab2)
+
+        # Page 3: Content editor
+        content_page_tab2 = QWidget()
+        content_layout_tab2 = QVBoxLayout(content_page_tab2)
+        content_layout_tab2.setContentsMargins(0, 0, 0, 0)
+        self.raw_text_area = QTextEdit()
+        self.raw_text_area.setObjectName("ResultContent")
+        self.raw_text_area.setAcceptRichText(False)
+        self.raw_text_area.setReadOnly(False)
+        self.raw_text_area.setPlaceholderText("Edit markdown content here...")
+        self.raw_text_area.setFocusPolicy(Qt.StrongFocus)
+        self.raw_text_area.setEnabled(True)
+        self.raw_text_area.viewport().setCursor(Qt.IBeamCursor)
+        self.raw_text_area.setCursor(Qt.IBeamCursor)
+        self.raw_text_area.setTextInteractionFlags(Qt.TextEditorInteraction)
+        content_layout_tab2.addWidget(self.raw_text_area)
+        self.tab2_stack.addWidget(content_page_tab2)
+        
+        t2_layout.addWidget(self.tab2_stack)
+        self.tab_stack.addWidget(tab2)
+
         tab_layout.addWidget(self.tab_stack)
-        
+        right_layout.addWidget(tab_container)
         self.tab1_btn.clicked.connect(lambda: self._switch_tab(0))
         self.tab2_btn.clicked.connect(lambda: self._switch_tab(1))
-        right_layout.addWidget(tab_container)
 
-        # Gộp hai panel
         body_layout.addWidget(left_panel, 3)
         body_layout.addWidget(right_panel, 7)
         layout.addWidget(body_container, 1)
 
-        # =====================================================
-        #                     FOOTER
-        # =====================================================
+        # ================= FOOTER =================
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 10, 0, 0)
         footer.setSpacing(10)
-
-        # ✅ Back Button (no icon)
         self.back_btn = QPushButton("Back")
         self.back_btn.setObjectName("FooterButton")
         self.back_btn.setCursor(Qt.PointingHandCursor)
         self.back_btn.clicked.connect(lambda: self.navigate_back_requested.emit())
-
-        # ✅ Stop OCR Button (no icon)
         self.stop_btn = QPushButton("Stop OCR")
         self.stop_btn.setObjectName("FooterStopButton")
         self.stop_btn.setCursor(Qt.PointingHandCursor)
-        self.stop_btn.clicked.connect(self._stop_ocr)
         self.stop_btn.setEnabled(False)
-
-        # ✅ Save As Button (NEW)
+        self.stop_btn.clicked.connect(self._stop_ocr)
         self.save_as_btn = QPushButton("Save As")
         self.save_as_btn.setObjectName("FooterSaveAsButton")
         self.save_as_btn.setCursor(Qt.PointingHandCursor)
-        self.save_as_btn.clicked.connect(self._save_as)
         self.save_as_btn.setEnabled(False)
-
-        # ✅ Save Button (renamed from Save Changes)
+        self.save_as_btn.clicked.connect(self._save_as_markdown)
         self.save_btn = QPushButton("Save")
         self.save_btn.setObjectName("FooterSaveButton")
         self.save_btn.setCursor(Qt.PointingHandCursor)
-        self.save_btn.clicked.connect(self._save_changes)
         self.save_btn.setEnabled(False)
-
-        left_group = QHBoxLayout()
-        left_group.setSpacing(8)
-        left_group.addWidget(self.back_btn)
-        left_group.addWidget(self.stop_btn)
-        footer.addLayout(left_group)
-        footer.addStretch(1)
-        footer.addWidget(self.save_as_btn, alignment=Qt.AlignRight)
-        footer.addWidget(self.save_btn, alignment=Qt.AlignRight)
+        self.save_btn.clicked.connect(self._save_markdown)
+        footer.addWidget(self.back_btn)
+        footer.addWidget(self.stop_btn)
+        footer.addStretch()
+        footer.addWidget(self.save_as_btn)
+        footer.addWidget(self.save_btn)
         layout.addLayout(footer)
 
+        # Load các GIF movies
+        self._load_gif_movies()
+
+    def _load_gif_movies(self):
+        """Load tất cả các GIF cần thiết"""
+        gif_size = QSize(300, 300)
+        
+        # Loading GIF (cho bước 3)
+        loading_path = self.project_root / "assets" / "gif" / "loading.gif"
+        if loading_path.exists():
+            self.loading_movie_tab1 = QMovie(str(loading_path))
+            self.loading_movie_tab2 = QMovie(str(loading_path))
+            self.loading_movie_tab1.setScaledSize(gif_size)
+            self.loading_movie_tab2.setScaledSize(gif_size)
+        
+        # Image GIF (cho bước 1 và 2)
+        image_path = self.project_root / "assets" / "gif" / "image.gif"
+        if image_path.exists():
+            self.image_movie_tab1 = QMovie(str(image_path))
+            self.image_movie_tab2 = QMovie(str(image_path))
+            self.image_movie_tab1.setScaledSize(gif_size)
+            self.image_movie_tab2.setScaledSize(gif_size)
+        
+        # Waiting GIF
+        waiting_path = self.project_root / "assets" / "gif" / "waiting.gif"
+        if waiting_path.exists():
+            self.waiting_movie_tab1 = QMovie(str(waiting_path))
+            self.waiting_movie_tab2 = QMovie(str(waiting_path))
+            self.waiting_movie_tab1.setScaledSize(gif_size)
+            self.waiting_movie_tab2.setScaledSize(gif_size)
+        
+        # Error GIF
+        error_path = self.project_root / "assets" / "gif" / "error.gif"
+        if error_path.exists():
+            self.error_movie_tab1 = QMovie(str(error_path))
+            self.error_movie_tab2 = QMovie(str(error_path))
+            self.error_movie_tab1.setScaledSize(gif_size)
+            self.error_movie_tab2.setScaledSize(gif_size)
+        
+        # Success GIF
+        success_path = self.project_root / "assets" / "gif" / "success.gif"
+        if success_path.exists():
+            self.success_movie_tab1 = QMovie(str(success_path))
+            self.success_movie_tab2 = QMovie(str(success_path))
+            self.success_movie_tab1.setScaledSize(gif_size)
+            self.success_movie_tab2.setScaledSize(gif_size)
+
     # =====================================================
-    #                     LOGIC
+    #                   Logic
     # =====================================================
-    def _switch_tab(self, index: int):
-        self.tab_stack.setCurrentIndex(index)
-        self.tab1_btn.setChecked(index == 0)
-        self.tab2_btn.setChecked(index == 1)
-
-    def load_files(self, files: list[Path], output_root: Path = None):
-        """Hiển thị danh sách file và tự động bắt đầu xử lý"""
-        self.clear_files()
-        self.files = files
-        self.file_items = []
+    def _load_storage_dir(self) -> Path:
+        """Load storage directory từ config file"""
+        config_path = self.project_root / "config" / "app_config.json"
         
-        # Tạo file items
-        for idx, f in enumerate(files, start=1):
-            row = FileRowItem(idx, f.name, "waiting", self.project_root)
-            self.file_container_layout.addWidget(row)
-            self.file_items.append(row)
-        
-        # Hiển thị preview của file đầu tiên
-        if files:
-            self._show_preview(0)
-        
-        # Tự động bắt đầu xử lý
-        if output_root is None:
-            output_root = self.project_root / "data" / "output"
-        
-        self._start_processing(files, output_root)
+        try:
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    storage_path_str = config.get("storage_path", "").strip()
+                    if storage_path_str:
+                        custom_dir = Path(storage_path_str)
+                        if custom_dir.exists():
+                            logger.info(f"Using custom storage path: {custom_dir}")
+                            return custom_dir
+                        else:
+                            logger.warning(f"Storage_path không tồn tại: {custom_dir}")
+            
+            # Nếu không có config hoặc storage_dir rỗng, dùng AppData mặc định
+            from PySide6.QtCore import QStandardPaths
+            app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+            default_path = Path(app_data) / "OCR-Medical" / "output"
+            default_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Using default AppData directory: {default_path}")
+            return default_path
+            
+        except Exception as e:
+            logger.error(f"Error loading storage directory from config: {str(e)}")
+            fallback_path = self.project_root / "data" / "output"
+            fallback_path.mkdir(parents=True, exist_ok=True)
+            return fallback_path
 
-    def clear_files(self):
-        """Xóa toàn bộ hàng file hiện tại"""
-        while self.file_container_layout.count():
-            item = self.file_container_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        self.file_items = []
+    def _switch_tab(self, idx: int):
+        self.tab_stack.setCurrentIndex(idx)
+        self.tab1_btn.setChecked(idx == 0)
+        self.tab2_btn.setChecked(idx == 1)
 
-    def _show_preview(self, index: int):
-        """Hiển thị preview của file tại index"""
-        if 0 <= index < len(self.files):
-            file_path = self.files[index]
-            try:
-                pixmap = QPixmap(str(file_path))
-                if not pixmap.isNull():
-                    scaled = pixmap.scaled(
-                        self.preview_box.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                    self.preview_box.setPixmap(scaled)
-                    self.current_preview_index = index
-            except Exception as e:
-                logger.error(f"Error loading preview: {e}")
+    def _show_processing_step(self, step: str):
+        """Hiển thị từng bước xử lý với GIF và text tương ứng"""
+        # Chuyển sang page processing (index 1)
+        self.tab1_stack.setCurrentIndex(1)
+        self.tab2_stack.setCurrentIndex(1)
+        
+        # Stop tất cả movies trước
+        self._stop_all_movies()
+        
+        if step == "load_model":
+            # Bước 1: Loading model
+            if hasattr(self, "image_movie_tab1"):
+                self.processing_gif_tab1.setMovie(self.image_movie_tab1)
+                self.image_movie_tab1.start()
+            if hasattr(self, "image_movie_tab2"):
+                self.processing_gif_tab2.setMovie(self.image_movie_tab2)
+                self.image_movie_tab2.start()
+            self.processing_text_tab1.setText("Loading model (1/3)")
+            self.processing_text_tab2.setText("Loading model (1/3)")
+            
+        elif step == "process_image":
+            # Bước 2: Processing image
+            if hasattr(self, "image_movie_tab1"):
+                self.processing_gif_tab1.setMovie(self.image_movie_tab1)
+                self.image_movie_tab1.start()
+            if hasattr(self, "image_movie_tab2"):
+                self.processing_gif_tab2.setMovie(self.image_movie_tab2)
+                self.image_movie_tab2.start()
+            self.processing_text_tab1.setText("Processing image (2/3)")
+            self.processing_text_tab2.setText("Processing image (2/3)")
+            
+        elif step == "extract_info":
+            # Bước 3: Extracting information
+            if hasattr(self, "loading_movie_tab1"):
+                self.processing_gif_tab1.setMovie(self.loading_movie_tab1)
+                self.loading_movie_tab1.start()
+            if hasattr(self, "loading_movie_tab2"):
+                self.processing_gif_tab2.setMovie(self.loading_movie_tab2)
+                self.loading_movie_tab2.start()
+            self.processing_text_tab1.setText("Extracting information (3/3)")
+            self.processing_text_tab2.setText("Extracting information (3/3)")
+            
+        elif step == "success":
+            # Bước 4: Success
+            if hasattr(self, "success_movie_tab1"):
+                self.processing_gif_tab1.setMovie(self.success_movie_tab1)
+                self.success_movie_tab1.start()
+            if hasattr(self, "success_movie_tab2"):
+                self.processing_gif_tab2.setMovie(self.success_movie_tab2)
+                self.success_movie_tab2.start()
+            
+            # Đếm số file đã completed
+            completed_count = sum(1 for status in self.file_status.values() if status == "completed")
+            total_count = len(self.files)
+            self.processing_text_tab1.setText(f"Success! Extracted {completed_count}/{total_count} file(s)")
+            self.processing_text_tab2.setText(f"Success! Extracted {completed_count}/{total_count} file(s)")
 
-    def _start_processing(self, files: list[Path], output_root: Path):
-        """Bắt đầu xử lý OCR với worker thread"""
-        if self.worker and self.worker.isRunning():
-            logger.warning("OCR is already running!")
+    def _show_waiting_state(self):
+        """Hiển thị trạng thái chờ xử lý"""
+        # Chuyển sang page processing (index 1)
+        self.tab1_stack.setCurrentIndex(1)
+        self.tab2_stack.setCurrentIndex(1)
+        
+        self._stop_all_movies()
+        
+        if hasattr(self, "waiting_movie_tab1"):
+            self.processing_gif_tab1.setMovie(self.waiting_movie_tab1)
+            self.waiting_movie_tab1.start()
+        if hasattr(self, "waiting_movie_tab2"):
+            self.processing_gif_tab2.setMovie(self.waiting_movie_tab2)
+            self.waiting_movie_tab2.start()
+        
+        self.processing_text_tab1.setText("Waiting for processing...")
+        self.processing_text_tab2.setText("Waiting for processing...")
+
+    def _show_error_state(self):
+        """Hiển thị trạng thái lỗi"""
+        # Chuyển sang page processing (index 1)
+        self.tab1_stack.setCurrentIndex(1)
+        self.tab2_stack.setCurrentIndex(1)
+        
+        self._stop_all_movies()
+        
+        if hasattr(self, "error_movie_tab1"):
+            self.processing_gif_tab1.setMovie(self.error_movie_tab1)
+            self.error_movie_tab1.start()
+        if hasattr(self, "error_movie_tab2"):
+            self.processing_gif_tab2.setMovie(self.error_movie_tab2)
+            self.error_movie_tab2.start()
+        
+        self.processing_text_tab1.setText("Error occurred. Please try again.")
+        self.processing_text_tab2.setText("Error occurred. Please try again.")
+
+    def _stop_all_movies(self):
+        """Dừng tất cả các GIF movies"""
+        for attr in ["loading_movie_tab1", "loading_movie_tab2", 
+                     "image_movie_tab1", "image_movie_tab2",
+                     "waiting_movie_tab1", "waiting_movie_tab2",
+                     "error_movie_tab1", "error_movie_tab2",
+                     "success_movie_tab1", "success_movie_tab2"]:
+            if hasattr(self, attr):
+                movie = getattr(self, attr)
+                if movie.state() == QMovie.Running:
+                    movie.stop()
+
+    def _show_result_content(self):
+        """Hiển thị kết quả OCR"""
+        # Chuyển sang page content (index 2)
+        self.tab1_stack.setCurrentIndex(2)
+        self.tab2_stack.setCurrentIndex(2)
+        
+        self._stop_all_movies()
+        
+        # Đảm bảo raw_text_area có thể nhận focus và tương tác
+        self.raw_text_area.setReadOnly(False)
+        self.raw_text_area.setEnabled(True)
+        self.raw_text_area.setFocusPolicy(Qt.StrongFocus)
+        
+        # Kết nối signal để cập nhật live preview khi chỉnh sửa
+        try:
+            self.raw_text_area.textChanged.disconnect(self._update_live_preview)
+        except:
+            pass
+        self.raw_text_area.textChanged.connect(self._update_live_preview)
+
+    def _show_empty_state(self):
+        """Hiển thị trạng thái rỗng"""
+        # Chuyển sang page empty (index 0)
+        self.tab1_stack.setCurrentIndex(0)
+        self.tab2_stack.setCurrentIndex(0)
+        self._stop_all_movies()
+
+    def _update_live_preview(self):
+        """Cập nhật markdown preview khi chỉnh sửa raw text"""
+        text = self.raw_text_area.toPlainText()
+        html = markdown.markdown(text, extensions=["tables", "fenced_code", "nl2br"])
+        self.markdown_preview.setHtml(html)
+        
+        # Cập nhật cache với nội dung mới
+        if self.current_preview_index in self.results_cache:
+            _, img_path = self.results_cache[self.current_preview_index]
+            self.results_cache[self.current_preview_index] = (text, img_path)
+
+    def _save_markdown(self):
+        """Lưu nội dung markdown hiện tại vào file gốc"""
+        idx = self.current_preview_index
+        
+        if idx not in self.file_md_paths:
+            logger.warning(f"No markdown file path for index {idx}")
             return
         
-        self.worker = OCRWorker(files, output_root)
+        md_path = self.file_md_paths[idx]
+        text = self.raw_text_area.toPlainText()
+        
+        try:
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            logger.info(f"Saved markdown to: {md_path}")
+            
+            # Cập nhật cache
+            if idx in self.results_cache:
+                _, img_path = self.results_cache[idx]
+                self.results_cache[idx] = (text, img_path)
+                
+        except Exception as e:
+            logger.error(f"Error saving markdown: {str(e)}")
+
+    def _save_as_markdown(self):
+        """Lưu nội dung markdown vào file mới"""
+        text = self.raw_text_area.toPlainText()
+        
+        # Sử dụng storage_dir làm thư mục mặc định
+        default_dir = str(self.storage_dir) if self.storage_dir else str(self.output_root)
+        
+        # Mở dialog để chọn vị trí lưu
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Markdown As",
+            default_dir,
+            "Markdown Files (*.md)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                logger.info(f"Saved markdown to: {file_path}")
+            except Exception as e:
+                logger.error(f"Error saving markdown: {str(e)}")
+
+    def load_files(self, files: list[Path], output_root: Path = None):
+        """Load danh sách files và bắt đầu xử lý"""
+        self.clear_files()
+        self.files = files
+        self.file_status = {}
+        self.file_md_paths = {}
+        
+        for idx, f in enumerate(files, start=1):
+            row = FileRowItem(idx, f.name, "waiting", self.project_root)
+            row.clicked.connect(self._on_file_clicked)
+            row.reload_requested.connect(self._on_reload_requested)
+            self.file_container_layout.addWidget(row)
+            self.file_items.append(row)
+            self.file_status[idx - 1] = "waiting"
+        
+        if files:
+            self._show_preview(0)
+            self._show_waiting_state()
+        
+        # Sử dụng storage_dir từ config thay vì output_root mặc định
+        if output_root:
+            self.output_root = output_root
+        else:
+            self.output_root = self.storage_dir
+        
+        logger.info(f"Output directory: {self.output_root}")
+        self._start_processing(files, self.output_root)
+
+    def clear_files(self):
+        """Xóa tất cả files khỏi danh sách"""
+        while self.file_container_layout.count():
+            item = self.file_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.file_items.clear()
+        self.file_status.clear()
+        self.results_cache.clear()
+        self.file_md_paths.clear()
+
+    def _show_preview(self, idx: int, processed=False):
+        """Hiển thị preview ảnh của file"""
+        if 0 <= idx < len(self.files):
+            path = self.files[idx]
+            if processed and idx in self.results_cache:
+                _, img = self.results_cache[idx]
+                path = Path(img)
+            
+            pix = QPixmap(str(path))
+            if not pix.isNull():
+                scaled = pix.scaled(self.preview_box.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview_box.setPixmap(scaled)
+                self.current_preview_index = idx
+
+    def _on_file_clicked(self, idx: int):
+        """Xử lý khi click vào dòng file"""
+        status = self.file_status.get(idx, "waiting")
+        
+        if status == "processing":
+            # Nếu đang xử lý, hiển thị bước cuối cùng
+            self._show_processing_step("extract_info")
+            self._show_preview(idx, processed=False)
+            
+        elif status == "completed" and idx in self.results_cache:
+            # Nếu hoàn thành, hiển thị kết quả
+            self._show_result_content()
+            md, img = self.results_cache[idx]
+            html = markdown.markdown(md, extensions=["tables", "fenced_code", "nl2br"])
+            self.markdown_preview.setHtml(html)
+            self.raw_text_area.setPlainText(md)
+            self._show_preview(idx, processed=True)
+            
+        elif status == "waiting":
+            # Nếu đang chờ, hiển thị trạng thái chờ
+            self._show_waiting_state()
+            self._show_preview(idx, processed=False)
+            
+        elif status == "failed":
+            # Nếu lỗi, hiển thị trạng thái lỗi
+            self._show_error_state()
+            self._show_preview(idx, processed=False)
+
+    def _on_reload_requested(self, idx: int):
+        """Xử lý yêu cầu reload file"""
+        # Kiểm tra xem có worker đang chạy không
+        if self.worker and self.worker.isRunning():
+            logger.warning(f"Cannot reload file {idx}: worker is running")
+            return
+        
+        # Kiểm tra xem file có đang processing không
+        if self.file_status.get(idx) == "processing":
+            logger.warning(f"Cannot reload file {idx}: file is currently processing")
+            return
+        
+        # Reset trạng thái file về waiting
+        self.file_status[idx] = "waiting"
+        self.file_items[idx].update_status("waiting")
+        
+        # Xóa kết quả cũ nếu có
+        if idx in self.results_cache:
+            del self.results_cache[idx]
+        if idx in self.file_md_paths:
+            del self.file_md_paths[idx]
+        
+        # Hiển thị waiting state nếu đang xem file này
+        if idx == self.current_preview_index:
+            self._show_waiting_state()
+            self._show_preview(idx, processed=False)
+        
+        # Bắt đầu xử lý lại file này
+        self._start_processing(self.files, self.output_root, file_indices=[idx])
+        
+        logger.info(f"Reloading file {idx}: {self.files[idx].name}")
+
+    def _start_processing(self, files, out_root, file_indices: list[int] = None):
+        """Bắt đầu xử lý OCR"""
+        if self.worker and self.worker.isRunning():
+            logger.warning("Worker is already running")
+            return
+        
+        self._show_waiting_state()
+        self.worker = OCRWorker(files, out_root, file_indices=file_indices)
         self.worker.progress.connect(self._on_progress)
+        self.worker.step_progress.connect(self._on_step_progress)
         self.worker.result.connect(self._on_result)
         self.worker.error.connect(self._on_error)
         self.worker.finished.connect(self._on_finished)
-        
+        self.worker.stopped.connect(self._on_stopped)
         self.stop_btn.setEnabled(True)
+        self.back_btn.setEnabled(False)
         self.worker.start()
-        
-        logger.info(f"Started OCR processing for {len(files)} files")
 
-    def _stop_ocr(self):
-        """Dừng xử lý OCR"""
-        if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait()
-            self.stop_btn.setEnabled(False)
-            logger.info("OCR processing stopped by user")
+    def _on_progress(self, idx, status):
+        """Cập nhật trạng thái xử lý"""
+        self.file_items[idx].update_status(status)
+        self.file_status[idx] = status
+        if status == "processing":
+            self._show_preview(idx, processed=False)
 
-    def _on_progress(self, index: int, status: str):
-        """Callback khi status thay đổi"""
-        if 0 <= index < len(self.file_items):
-            self.file_items[index].update_status(status)
-            
-            # Hiển thị preview khi bắt đầu xử lý
-            if status == "processing":
-                self._show_preview(index)
+    def _on_step_progress(self, idx, step: str):
+        """Xử lý cập nhật từng bước xử lý"""
+        # Chỉ hiển thị step nếu đang xem file đang được xử lý
+        if idx == self.current_preview_index:
+            self._show_processing_step(step)
 
-    def _on_result(self, index: int, markdown_text: str, processed_image: str):
-        """Callback khi có kết quả OCR"""
-        logger.info(f"Received result for file {index + 1}")
+    def _on_result(self, idx, text, img):
+        """Xử lý kết quả OCR"""
+        self.results_cache[idx] = (text, img)
+        self.file_items[idx].update_status("completed")
+        self.file_status[idx] = "completed"
         
-        # Hiển thị markdown
-        self.markdown_preview.setMarkdown(markdown_text)
-        self.raw_text_area.setPlainText(markdown_text)
+        # Lưu đường dẫn file markdown
+        img_name = self.files[idx].stem
+        md_path = self.output_root / img_name / "text" / f"{img_name}_processed.md"
+        self.file_md_paths[idx] = md_path
         
-        # Hiển thị processed image
-        if Path(processed_image).exists():
-            pixmap = QPixmap(processed_image)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    self.preview_box.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.preview_box.setPixmap(scaled)
+        # Chỉ hiển thị kết quả nếu đang xem file này
+        if idx == self.current_preview_index:
+            self._show_result_content()
+            html = markdown.markdown(text, extensions=["tables", "fenced_code", "nl2br"])
+            self.markdown_preview.setHtml(html)
+            self.raw_text_area.setPlainText(text)
+            self._show_preview(idx, processed=True)
         
         self.save_btn.setEnabled(True)
         self.save_as_btn.setEnabled(True)
 
-    def _on_error(self, index: int, error_msg: str):
-        """Callback khi có lỗi"""
-        logger.error(f"Error processing file {index + 1}: {error_msg}")
+    def _on_error(self, idx, msg):
+        """Xử lý lỗi OCR"""
+        self.file_items[idx].update_status("failed")
+        self.file_status[idx] = "failed"
+        
+        # Chỉ hiển thị error nếu đang xem file này
+        if idx == self.current_preview_index:
+            self._show_error_state()
+        
+        logger.error(f"OCR error on file {idx}: {msg}")
 
     def _on_finished(self):
-        """Callback khi hoàn thành tất cả"""
+        """Xử lý khi worker hoàn thành"""
         self.stop_btn.setEnabled(False)
+        self.back_btn.setEnabled(True)
+        logger.info("OCR worker finished.")
+    
+    def _on_stopped(self):
+        """Xử lý khi worker bị dừng giữa chừng"""
+        self.stop_btn.setEnabled(False)
+        self.back_btn.setEnabled(True)
         
-        completed = sum(1 for item in self.file_items if item.current_state == "completed")
-        failed = sum(1 for item in self.file_items if item.current_state == "failed")
+        # Reset các file đang processing về waiting
+        for idx, status in self.file_status.items():
+            if status == "processing":
+                self.file_status[idx] = "waiting"
+                self.file_items[idx].update_status("waiting")
         
-        logger.info(f"OCR processing complete: {completed} succeeded, {failed} failed")
+        # Hiển thị empty state
+        self._show_empty_state()
+        logger.info("OCR worker stopped by user.")
 
-    def _save_changes(self):
-        """Lưu thay đổi"""
-        logger.info("Save button clicked - results already saved to output directory")
-
-    def _save_as(self):
-        """Lưu vào vị trí khác"""
-        from PySide6.QtWidgets import QFileDialog
-        folder = QFileDialog.getExistingDirectory(self, "Select folder to save")
-        if folder:
-            logger.info(f"Save As to: {folder}")
-            # TODO: Implement save as logic
+    def _stop_ocr(self):
+        """Dừng xử lý OCR - Tối ưu không lag"""
+        if self.worker and self.worker.isRunning():
+            # Disable nút stop ngay lập tức để tránh click nhiều lần
+            self.stop_btn.setEnabled(False)
+            self.stop_btn.setText("Stopping...")
+            
+            # Gọi stop worker
+            self.worker.stop()
+            
+            # Sử dụng QTimer để đợi worker dừng mà không block UI
+            from PySide6.QtCore import QTimer
+            
+            timeout_counter = [0]
+            
+            def check_worker_stopped():
+                if not self.worker.isRunning():
+                    self.stop_btn.setText("Stop OCR")
+                    logger.info("OCR stopped successfully")
+                else:
+                    timeout_counter[0] += 1
+                    if timeout_counter[0] > 20:
+                        logger.warning("Force terminating worker...")
+                        self.worker.terminate_worker()
+                        self.worker.wait(1000)
+                        self.stop_btn.setText("Stop OCR")
+                        self._on_stopped()
+            
+            timer = QTimer()
+            timer.timeout.connect(check_worker_stopped)
+            timer.start(100)
+            self._stop_timer = timer    
 ```
 
 ## `file_log_page.py`
 **Path:** `ocr_medical/ui/pages/file_log_page.py`
 
 ```python
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, 
-                                QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
-                                QMessageBox, QFrame, QDialog, QTabWidget, QTextEdit,
-                                QListWidget, QListWidgetItem, QComboBox, QDoubleSpinBox)
-from PySide6.QtCore import Qt, QSize, QMimeData
-from PySide6.QtGui import QAction, QColor, QClipboard, QGuiApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox,
+    QFrame, QDialog, QTextEdit, QComboBox, QWidget, QScrollArea
+)
+from PySide6.QtCore import Qt, QSize, QStandardPaths
+from PySide6.QtGui import QPixmap, QPainter, QMouseEvent
 from pathlib import Path
 import json
 from datetime import datetime
+import shutil
+import logging
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_svg_colored
+
+logger = logging.getLogger(__name__)
+ITEMS_PER_PAGE = 6
 
 
+# =====================================================
+# Image Compare Widget
+# =====================================================
+class ImageCompareWidget(QFrame):
+    """So sánh ảnh original / processed bằng thanh kéo"""
+    def __init__(self, original: Path, processed: Path):
+        super().__init__()
+        self.original = QPixmap(str(original)) if original and original.exists() else None
+        self.processed = QPixmap(str(processed)) if processed and processed.exists() else None
+        self.slider_pos = 0.5
+        self.setMinimumHeight(500)
+        self.setMouseTracking(True)
+        self.setObjectName("ImageCompare")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.white)
+        
+        if not (self.original and self.processed):
+            painter.setPen(Qt.gray)
+            painter.drawText(self.rect(), Qt.AlignCenter, "(Missing image files)")
+            return
+
+        size = self.size()
+        
+        # Scale images to fit while maintaining aspect ratio
+        ori_scaled = self.original.scaled(
+            size, 
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation
+        )
+        proc_scaled = self.processed.scaled(
+            size, 
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation
+        )
+        
+        # Center images
+        ori_x = (size.width() - ori_scaled.width()) // 2
+        ori_y = (size.height() - ori_scaled.height()) // 2
+        proc_x = (size.width() - proc_scaled.width()) // 2
+        proc_y = (size.height() - proc_scaled.height()) // 2
+        
+        split_x = int(size.width() * self.slider_pos)
+        
+        # Draw original image (left side)
+        painter.setClipRect(0, 0, split_x, size.height())
+        painter.drawPixmap(ori_x, ori_y, ori_scaled)
+        
+        # Draw processed image (right side)
+        painter.setClipRect(split_x, 0, size.width() - split_x, size.height())
+        painter.drawPixmap(proc_x, proc_y, proc_scaled)
+        
+        # Draw slider line
+        painter.setClipping(False)
+        painter.setPen(Qt.black)
+        painter.drawLine(split_x, 0, split_x, size.height())
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        self.slider_pos = max(0.0, min(1.0, event.position().x() / self.width()))
+        self.update()
+
+
+# =====================================================
+# Detail Dialog
+# =====================================================
 class FileDetailDialog(QDialog):
-    """Dialog hiển thị chi tiết folder"""
+    """Hiển thị ảnh và markdown song song với khả năng scroll"""
     def __init__(self, folder: Path, theme_data: dict, parent=None):
         super().__init__(parent)
         self.folder = folder
         self.theme_data = theme_data
         self.setWindowTitle(f"Details - {folder.name}")
-        self.setGeometry(100, 100, 700, 500)
+        self.resize(1200, 700)
+        self.setObjectName("FileDetailDialog")
+
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(16)
+
+        # Left Panel - Image Compare
+        left = QFrame()
+        left.setObjectName("LeftPanel")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
         
-        layout = QVBoxLayout(self)
+        lbl = QLabel("🖼️ Compare (Original ↔ Processed)")
+        lbl.setStyleSheet("font-weight: 700; font-size: 15px;")
+        left_layout.addWidget(lbl)
+
+        # Find images
+        ori = None
+        proc = None
         
-        # --- Info chung ---
-        info_frame = QFrame()
-        info_frame.setObjectName("InfoFrame")
-        info_layout = QHBoxLayout(info_frame)
+        original_dir = folder / "original"
+        processed_dir = folder / "processed"
         
-        info_text = QLabel(f"📁 {folder.name}")
-        info_text.setObjectName("InfoTitle")
-        info_layout.addWidget(info_text)
+        if original_dir.exists():
+            for ext in ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif']:
+                files = list(original_dir.glob(ext))
+                if files:
+                    ori = files[0]
+                    break
         
-        copy_btn = QPushButton("Copy Path")
-        copy_btn.setFixedWidth(100)
-        copy_btn.clicked.connect(self._copy_path)
-        info_layout.addStretch(1)
-        info_layout.addWidget(copy_btn)
+        if processed_dir.exists():
+            for ext in ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif']:
+                files = list(processed_dir.glob(ext))
+                if files:
+                    proc = files[0]
+                    break
+
+        # Image info
+        info_text = ""
+        if ori and ori.exists():
+            pixmap = QPixmap(str(ori))
+            size_mb = ori.stat().st_size / (1024 * 1024)
+            info_text = f"Original: {pixmap.width()}x{pixmap.height()}px, {size_mb:.2f}MB"
         
-        layout.addWidget(info_frame)
+        if proc and proc.exists():
+            pixmap = QPixmap(str(proc))
+            size_mb = proc.stat().st_size / (1024 * 1024)
+            if info_text:
+                info_text += " | "
+            info_text += f"Processed: {pixmap.width()}x{pixmap.height()}px, {size_mb:.2f}MB"
         
-        # --- Tab widget ---
-        tabs = QTabWidget()
+        if info_text:
+            info_label = QLabel(info_text)
+            info_label.setStyleSheet("color: #666; font-size: 12px;")
+            left_layout.addWidget(info_label)
+
+        # Scroll area for image
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        # Tab 1: Original
-        original_tab = QWidget()
-        original_layout = QVBoxLayout(original_tab)
-        original_dir = self.folder / "original"
-        original_layout.addWidget(self._create_files_list(original_dir))
-        tabs.addTab(original_tab, "Original")
+        self.img_cmp = ImageCompareWidget(ori, proc)
+        scroll.setWidget(self.img_cmp)
+        left_layout.addWidget(scroll, 1)
+
+        # Right Panel - Markdown Editor
+        right = QFrame()
+        right.setObjectName("RightPanel")
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        title = QLabel("📝 Extracted Markdown (Editable)")
+        title.setStyleSheet("font-weight: 700; font-size: 15px;")
+        right_layout.addWidget(title)
+
+        self.editor = QTextEdit()
+        self.editor.setObjectName("MarkdownEditor")
+        self.editor.setAcceptRichText(False)
+        self.editor.setStyleSheet("font-size: 14px; font-family: 'Consolas', 'Monaco', monospace;")
+        right_layout.addWidget(self.editor, 1)
+
+        self.save_btn = QPushButton("💾 Save Changes")
+        self.save_btn.setObjectName("SaveBtn")
+        self.save_btn.setCursor(Qt.PointingHandCursor)
+        self.save_btn.clicked.connect(self._save)
+        right_layout.addWidget(self.save_btn, alignment=Qt.AlignRight)
+
+        # Load markdown
+        self.text_path = None
+        text_dir = folder / "text"
+        if text_dir.exists():
+            md_files = list(text_dir.glob("*.md"))
+            if md_files:
+                self.text_path = md_files[0]
+                if self.text_path.exists():
+                    try:
+                        content = self.text_path.read_text(encoding="utf-8")
+                        self.editor.setPlainText(content)
+                    except Exception as e:
+                        logger.error(f"Error reading markdown: {e}")
+                        self.editor.setPlainText(f"Error loading file: {e}")
+
+        main_layout.addWidget(left, 5)
+        main_layout.addWidget(right, 5)
+
+    def _save(self):
+        if not self.text_path:
+            QMessageBox.warning(self, "Error", "Markdown file not found.")
+            return
         
-        # Tab 2: Processed
-        processed_tab = QWidget()
-        processed_layout = QVBoxLayout(processed_tab)
-        processed_dir = self.folder / "processed"
-        processed_layout.addWidget(self._create_files_list(processed_dir))
-        tabs.addTab(processed_tab, "Processed")
-        
-        # Tab 3: Text
-        text_tab = QWidget()
-        text_layout = QVBoxLayout(text_tab)
-        text_dir = self.folder / "text"
-        text_list = self._create_files_list(text_dir)
-        text_layout.addWidget(text_list)
-        
-        self.text_preview = QTextEdit()
-        self.text_preview.setReadOnly(True)
-        self.text_preview.setMaximumHeight(200)
-        text_layout.addWidget(QLabel("Preview:"))
-        text_layout.addWidget(self.text_preview)
-        
-        tabs.addTab(text_tab, "Text/Markdown")
-        
-        layout.addWidget(tabs)
-        
-        # --- Buttons ---
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch(1)
-        
-        open_btn = QPushButton("Open in Explorer")
-        open_btn.clicked.connect(self._open_folder)
-        btn_layout.addWidget(open_btn)
-        
-        delete_btn = QPushButton("Delete Folder")
-        delete_btn.setObjectName("DeleteBtn")
-        delete_btn.clicked.connect(self._delete_folder)
-        btn_layout.addWidget(delete_btn)
-        
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(close_btn)
-        
-        layout.addLayout(btn_layout)
-    
-    def _create_files_list(self, directory: Path) -> QListWidget:
-        """Tạo danh sách file"""
-        list_widget = QListWidget()
-        list_widget.setObjectName("FilesList")
-        
-        if not directory.exists():
-            item = QListWidgetItem("(Empty)")
-            item.setForeground(QColor("#999"))
-            list_widget.addItem(item)
-            return list_widget
-        
-        for file in sorted(directory.glob("*")):
-            if file.is_file():
-                size_kb = file.stat().st_size / 1024
-                size_text = f"{size_kb/1024:.2f} MB" if size_kb > 1024 else f"{size_kb:.0f} KB"
-                
-                item_text = f"{file.name} ({size_text})"
-                item = QListWidgetItem(item_text)
-                item.setData(Qt.UserRole, str(file))
-                list_widget.addItem(item)
-        
-        return list_widget
-    
-    def _copy_path(self):
-        clipboard = QGuiApplication.clipboard()
-        clipboard.setText(str(self.folder))
-        QMessageBox.information(self, "Copied", "Path copied to clipboard!")
-    
-    def _open_folder(self):
-        import os, platform
         try:
-            if platform.system() == "Windows":
-                os.startfile(self.folder)
-            elif platform.system() == "Darwin":
-                os.system(f"open '{self.folder}'")
-            else:
-                os.system(f"xdg-open '{self.folder}'")
+            self.text_path.write_text(self.editor.toPlainText(), encoding="utf-8")
+            QMessageBox.information(self, "Saved", "File saved successfully!")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Cannot open folder:\n{e}")
-    
-    def _delete_folder(self):
+            QMessageBox.critical(self, "Error", f"Failed to save file: {e}")
+
+
+# =====================================================
+# Folder Card
+# =====================================================
+class FolderCard(QFrame):
+    def __init__(self, folder: Path, theme_data: dict, project_root: Path, view_cb, del_cb):
+        super().__init__()
+        self.folder = folder
+        self.view_cb = view_cb
+        self.del_cb = del_cb
+        self.setObjectName("FolderCard")
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        # Header
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        
+        name = QLabel(folder.name)
+        name.setObjectName("FolderName")
+        name.setWordWrap(True)
+        head.addWidget(name, 1)
+        
+        status, color = self._get_status()
+        badge = QLabel(status)
+        badge.setObjectName("StatusBadge")
+        badge.setStyleSheet(f"background:{color}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;")
+        head.addWidget(badge)
+        layout.addLayout(head)
+
+        # Info
+        info = QHBoxLayout()
+        info.setSpacing(12)
+        info.addWidget(QLabel(f"📄 Files: {self._count()}"))
+        info.addWidget(QLabel(f"🕒 {self._time()}"))
+        info.addWidget(QLabel(f"📦 {self._size()}"))
+        info.addStretch()
+        layout.addLayout(info)
+
+        # Actions
+        btns = QHBoxLayout()
+        btns.setSpacing(8)
+        btns.addStretch()
+        
+        view = QPushButton("View Details")
+        view.setObjectName("ViewBtn")
+        view.setCursor(Qt.PointingHandCursor)
+        view.clicked.connect(lambda: view_cb(folder))
+        
+        delete = QPushButton("Delete")
+        delete.setObjectName("DeleteBtn")
+        delete.setCursor(Qt.PointingHandCursor)
+        delete.clicked.connect(lambda: del_cb(folder))
+        
+        btns.addWidget(view)
+        btns.addWidget(delete)
+        layout.addLayout(btns)
+
+    def _get_status(self):
+        text_dir = self.folder / "text"
+        proc_dir = self.folder / "processed"
+        orig_dir = self.folder / "original"
+        
+        has_text = text_dir.exists() and any(text_dir.iterdir())
+        has_proc = proc_dir.exists() and any(proc_dir.iterdir())
+        has_orig = orig_dir.exists() and any(orig_dir.iterdir())
+        
+        if has_text and has_proc and has_orig:
+            return "Success", "#22C55E"
+        elif has_proc:
+            return "Partial", "#FB923C"
+        return "Pending", "#3B82F6"
+
+    def _count(self):
+        try:
+            return sum(1 for _ in self.folder.rglob("*") if _.is_file())
+        except Exception:
+            return 0
+
+    def _size(self):
+        try:
+            total_size = sum(f.stat().st_size for f in self.folder.rglob("*") if f.is_file())
+            return f"{total_size / (1024*1024):.2f} MB"
+        except Exception:
+            return "0.00 MB"
+
+    def _time(self):
+        try:
+            mtime = datetime.fromtimestamp(self.folder.stat().st_mtime)
+            return mtime.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return "Unknown"
+
+
+# =====================================================
+# FileLogPage
+# =====================================================
+class FileLogPage(BasePage):
+    def __init__(self, theme_manager: ThemeManager, parent=None):
+        super().__init__("File Log", theme_manager, parent)
+        layout = self.layout()
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        self.project_root = Path(__file__).resolve().parent.parent.parent
+        self.output_dir = self._load_storage()
+        self.theme_data = theme_manager.get_theme_data()
+        self.all_folders = []
+        self.filtered = []
+        self.current_page = 1
+        self.search_text = ""
+
+        # === Top Bar ===
+        top = QHBoxLayout()
+        top.setSpacing(8)
+
+        self.search = QLineEdit()
+        self.search.setObjectName("SearchBar")
+        self.search.setPlaceholderText("Search folders...")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._on_search_changed)
+        top.addWidget(self.search, 3)
+
+        self.sort = QComboBox()
+        self.sort.setObjectName("SortBox")
+        self.sort.addItems(["Date (Newest)", "Date (Oldest)", "Name (A-Z)", "Name (Z-A)", "Size (Largest)", "Size (Smallest)"])
+        self.sort.currentTextChanged.connect(self._on_sort_changed)
+        self.sort.setCursor(Qt.PointingHandCursor)
+        top.addWidget(self.sort, 1)
+
+        self.refresh = QPushButton("Refresh")
+        self.refresh.setObjectName("RefreshBtn")
+        self.refresh.setCursor(Qt.PointingHandCursor)
+        self.refresh.clicked.connect(self.load_logs)
+        top.addWidget(self.refresh)
+        
+        layout.addLayout(top)
+
+        # === Summary ===
+        self.summary_label = QLabel()
+        self.summary_label.setObjectName("SummaryLabel")
+        self.summary_label.setStyleSheet("color: #666; font-size: 13px; padding: 4px 0;")
+        layout.addWidget(self.summary_label)
+
+        # === Cards Container ===
+        self.card_container = QWidget()
+        self.card_layout = QVBoxLayout(self.card_container)
+        self.card_layout.setSpacing(10)
+        self.card_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.card_container, 1)
+
+        # === Pagination ===
+        bottom = QHBoxLayout()
+        bottom.setSpacing(10)
+
+        self.page_info_label = QLabel()
+        self.page_info_label.setObjectName("PageInfo")
+        self.page_info_label.setStyleSheet("font-size: 13px; color: #666;")
+        bottom.addWidget(self.page_info_label)
+
+        bottom.addStretch()
+        
+        self.prev = QPushButton("◀ Previous")
+        self.prev.setObjectName("PageBtn")
+        self.prev.setCursor(Qt.PointingHandCursor)
+        self.prev.clicked.connect(self._prev_page)
+        bottom.addWidget(self.prev)
+
+        self.page_label = QLabel()
+        self.page_label.setObjectName("PageLbl")
+        self.page_label.setStyleSheet("font-weight: 600; font-size: 14px; padding: 0 12px;")
+        bottom.addWidget(self.page_label)
+
+        self.next = QPushButton("Next ▶")
+        self.next.setObjectName("PageBtn")
+        self.next.setCursor(Qt.PointingHandCursor)
+        self.next.clicked.connect(self._next_page)
+        bottom.addWidget(self.next)
+        
+        layout.addLayout(bottom)
+
+        # Load initial data
+        self.load_logs()
+
+    def _load_storage(self):
+        """Load storage directory từ config file (ưu tiên storage_path nếu có, ngược lại dùng AppData)"""
+        from PySide6.QtCore import QStandardPaths
+        cfg = self.project_root / "config" / "app_config.json"
+        try:
+            if cfg.exists():
+                with cfg.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    storage_path_str = data.get("storage_path", "").strip()
+                    if storage_path_str:
+                        custom_dir = Path(storage_path_str)
+                        if custom_dir.exists():
+                            logger.info(f"📁 Using custom storage path: {custom_dir}")
+                            return custom_dir
+                        else:
+                            logger.warning(f"⚠️ storage_path không tồn tại: {custom_dir}")
+            # fallback AppData
+            default = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "OCR-Medical" / "output"
+            default.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Using default AppData directory: {default}")
+            return default
+        except Exception as e:
+            logger.error(f"Error loading storage path: {e}")
+            fallback = Path.cwd() / "data" / "output"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
+
+    def load_logs(self):
+        """Load all folders from output directory"""
+        try:
+            self.all_folders = [f for f in self.output_dir.iterdir() if f.is_dir()]
+            self._apply_filters()
+        except Exception as e:
+            logger.error(f"Error loading logs: {e}")
+            self.all_folders = []
+            self.filtered = []
+            self._update_page()
+
+    def _on_search_changed(self, text: str):
+        """Handle search text change"""
+        self.search_text = text.lower().strip()
+        self.current_page = 1
+        self._apply_filters()
+
+    def _on_sort_changed(self):
+        """Handle sort option change"""
+        self._apply_filters()
+
+    def _apply_filters(self):
+        """Apply search and sort filters"""
+        # Apply search filter
+        if self.search_text:
+            self.filtered = [f for f in self.all_folders if self.search_text in f.name.lower()]
+        else:
+            self.filtered = self.all_folders.copy()
+        
+        # Apply sort
+        mode = self.sort.currentText()
+        try:
+            if "Date" in mode:
+                reverse = "Newest" in mode
+                self.filtered.sort(key=lambda f: f.stat().st_mtime, reverse=reverse)
+            elif "Name" in mode:
+                reverse = "Z-A" in mode
+                self.filtered.sort(key=lambda f: f.name.lower(), reverse=reverse)
+            elif "Size" in mode:
+                reverse = "Largest" in mode
+                self.filtered.sort(
+                    key=lambda f: sum(x.stat().st_size for x in f.rglob("*") if x.is_file()), 
+                    reverse=reverse
+                )
+        except Exception as e:
+            logger.error(f"Error sorting: {e}")
+        
+        self._update_page()
+
+    def _update_page(self):
+        """Update the current page display"""
+        # Clear existing cards
+        for i in reversed(range(self.card_layout.count())):
+            widget = self.card_layout.takeAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
+        total_items = len(self.filtered)
+        total_pages = max(1, (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        self.current_page = max(1, min(self.current_page, total_pages))
+        
+        start_idx = (self.current_page - 1) * ITEMS_PER_PAGE
+        end_idx = min(start_idx + ITEMS_PER_PAGE, total_items)
+
+        # Add cards for current page
+        if total_items > 0:
+            for folder in self.filtered[start_idx:end_idx]:
+                card = FolderCard(folder, self.theme_data, self.project_root, self._view_details, self._delete_folder)
+                self.card_layout.addWidget(card)
+        else:
+            # Show empty state
+            empty_label = QLabel("No folders found")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: #999; font-size: 16px; padding: 40px;")
+            self.card_layout.addWidget(empty_label)
+
+        # Add stretch at the end
+        self.card_layout.addStretch()
+
+        # Update labels
+        if total_items > 0:
+            self.page_label.setText(f"Page {self.current_page} of {total_pages}")
+            self.page_info_label.setText(f"Showing {start_idx + 1}-{end_idx} of {total_items} folders")
+            
+            total_size = sum(
+                sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+                for folder in self.filtered
+            )
+            self.summary_label.setText(
+                f"Total: {total_items} folders | {total_size / (1024*1024):.2f} MB"
+            )
+        else:
+            self.page_label.setText("Page 0 of 0")
+            self.page_info_label.setText("No folders to display")
+            self.summary_label.setText("Total: 0 folders | 0.00 MB")
+
+        # Update button states
+        self.prev.setEnabled(self.current_page > 1)
+        self.next.setEnabled(self.current_page < total_pages)
+
+    def _prev_page(self):
+        """Go to previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self._update_page()
+
+    def _next_page(self):
+        """Go to next page"""
+        total_pages = max(1, (len(self.filtered) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        if self.current_page < total_pages:
+            self.current_page += 1
+            self._update_page()
+
+    def _view_details(self, folder: Path):
+        """Open detail dialog for folder"""
+        try:
+            dialog = FileDetailDialog(folder, self.theme_data, self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening details: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to open details: {e}")
+
+    def _delete_folder(self, folder: Path):
+        """Delete folder with confirmation"""
         reply = QMessageBox.question(
-            self,
-            'Delete Folder',
-            f'Are you sure you want to delete "{self.folder.name}" and all its contents?',
+            self, 
+            "Confirm Delete", 
+            f"Are you sure you want to delete '{folder.name}'?\nThis action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
-                import shutil
-                shutil.rmtree(self.folder)
-                QMessageBox.information(self, "Deleted", "Folder deleted successfully!")
-                self.accept()
+                shutil.rmtree(folder, ignore_errors=True)
+                QMessageBox.information(self, "Deleted", f"Folder '{folder.name}' has been deleted.")
+                self.load_logs()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete:\n{e}")
-
-
-class FileLogPage(BasePage):
-    """
-    Trang hiển thị lịch sử các file đã xử lý
-    """
-    def __init__(self, theme_manager: ThemeManager, parent=None) -> None:
-        super().__init__("File Log", theme_manager, parent)
-        layout = self.layout()
-        
-        self.project_root = Path(__file__).resolve().parent.parent.parent
-        self.output_dir = self.project_root / "data" / "output"
-        self.theme_data = theme_manager.get_theme_data()
-
-        # --- Search & Filter ---
-        search_layout = QHBoxLayout()
-        
-        self.search_bar = QLineEdit()
-        self.search_bar.setObjectName("SearchBar")
-        self.search_bar.setPlaceholderText("Search files, content...")
-        self.search_bar.textChanged.connect(self._on_search)
-        
-        icon_path = self.project_root / "assets" / "icon" / "search.svg"
-        if icon_path.exists():
-            search_icon = load_svg_colored(icon_path, self.theme_data["color"]["text"]["placeholder"], 16)
-            action = QAction(search_icon, "", self.search_bar)
-            self.search_bar.addAction(action, QLineEdit.LeadingPosition)
-        
-        search_layout.addWidget(self.search_bar)
-        
-        # --- Sort dropdown ---
-        sort_label = QLabel("Sort by:")
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Date (Newest)", "Date (Oldest)", "Name (A-Z)", "Name (Z-A)", "Size (Large)"])
-        self.sort_combo.currentTextChanged.connect(self._on_sort_changed)
-        search_layout.addWidget(sort_label)
-        search_layout.addWidget(self.sort_combo)
-        
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setObjectName("RefreshButton")
-        refresh_btn.clicked.connect(self.load_logs)
-        refresh_btn.setFixedWidth(80)
-        search_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(search_layout)
-
-        # --- Stats ---
-        self.stats_label = QLabel()
-        self.stats_label.setObjectName("StatsLabel")
-        layout.addWidget(self.stats_label)
-
-        # --- Table ---
-        self.table = QTableWidget()
-        self.table.setObjectName("LogTable")
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels([
-            "File Name", "Size", "Processed Time", 
-            "Status", "Files", "Actions"
-        ])
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        
-        layout.addWidget(self.table)
-
-        self.load_logs()
-
-    def load_logs(self):
-        self.table.setRowCount(0)
-        
-        if not self.output_dir.exists():
-            self.stats_label.setText("No output directory found")
-            return
-        
-        folders = [d for d in self.output_dir.iterdir() if d.is_dir()]
-        total = len(folders)
-        success = 0
-        
-        for folder in folders:
-            text_dir = folder / "text"
-            processed_dir = folder / "processed"
-            original_dir = folder / "original"
-            
-            has_original = original_dir.exists() and any(original_dir.glob("*"))
-            has_text = text_dir.exists() and any(text_dir.glob("*.md"))
-            has_processed = processed_dir.exists() and any(processed_dir.glob("*.png"))
-            
-            if has_text and has_processed and has_original:
-                success += 1
-                status = "Success"
-                status_color = "#4CAF50"
-            elif has_processed:
-                status = "Partial"
-                status_color = "#FF9800"
-            else:
-                status = "Pending"
-                status_color = "#2196F3"
-            
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            
-            # File name
-            self.table.setItem(row, 0, QTableWidgetItem(folder.name))
-            
-            # Size
-            try:
-                total_size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
-                size_mb = total_size / (1024 * 1024)
-                size_text = f"{size_mb:.2f} MB"
-            except:
-                size_text = "--"
-            self.table.setItem(row, 1, QTableWidgetItem(size_text))
-            
-            # Time
-            try:
-                mtime = folder.stat().st_mtime
-                time_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-            except:
-                time_str = "--"
-            self.table.setItem(row, 2, QTableWidgetItem(time_str))
-            
-            # Status
-            status_item = QTableWidgetItem(status)
-            status_item.setForeground(QColor(status_color))
-            self.table.setItem(row, 3, status_item)
-            
-            # Files count
-            count_text = f"O:{1 if has_original else 0} P:{1 if has_processed else 0} T:{1 if has_text else 0}"
-            self.table.setItem(row, 4, QTableWidgetItem(count_text))
-            
-            # Actions
-            view_btn = QPushButton("View")
-            view_btn.setObjectName("ViewButton")
-            view_btn.setFixedWidth(70)
-            view_btn.clicked.connect(lambda checked, f=folder: self._view_details(f))
-            self.table.setCellWidget(row, 5, view_btn)
-        
-        self.stats_label.setText(f"Total: {total} | ✅ Success: {success} | ❌ Failed: {total - success}")
-
-    def _on_search(self, text: str):
-        text = text.lower().strip()
-        
-        for row in range(self.table.rowCount()):
-            filename = self.table.item(row, 0).text().lower()
-            visible = not text or text in filename
-            self.table.setRowHidden(row, not visible)
-
-    def _on_sort_changed(self, sort_type: str):
-        """Sắp xếp bảng"""
-        rows = []
-        for row in range(self.table.rowCount()):
-            if not self.table.isRowHidden(row):
-                rows.append(row)
-        
-        # Simple sort (có thể mở rộng)
-        if "Name (A-Z)" in sort_type:
-            rows.sort(key=lambda r: self.table.item(r, 0).text())
-        elif "Name (Z-A)" in sort_type:
-            rows.sort(key=lambda r: self.table.item(r, 0).text(), reverse=True)
-        
-        # Refresh hiển thị (có thể tối ưu hơn)
-        self.load_logs()
-
-    def _view_details(self, folder: Path):
-        dialog = FileDetailDialog(folder, self.theme_data, self)
-        if dialog.exec() == QDialog.Accepted:
-            # Refresh nếu folder bị xóa
-            self.load_logs()
+                logger.error(f"Error deleting folder: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to delete folder: {e}")
 ```
 
 ## `home_page.py`
@@ -1004,15 +1840,17 @@ class FileLogPage(BasePage):
 
 ```python
 from __future__ import annotations
+from pathlib import Path
+from PySide6.QtCore import Qt, Signal, QSize, QStandardPaths
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QHBoxLayout, QVBoxLayout, QLineEdit, QSizePolicy,
                                QPushButton, QLabel, QFrame, QFileDialog, QWidget,
                                QScrollArea, QMessageBox, QGridLayout)
 from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt, QSize, Signal
-from pathlib import Path
 from threading import Lock
 import os
 import logging
+import json
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
@@ -1361,11 +2199,8 @@ class HomePage(BasePage):
         folder_layout.addWidget(folder_label)
         storage_layout.addWidget(folder_box)
 
-        default_output = self.project_root / "data" / "output"
-        try:
-            default_output.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Failed to create default output directory: {e}")
+        # Load storage directory từ config
+        default_output = self._load_storage_dir()
 
         self.storage_path = QLineEdit(str(default_output))
         self.storage_path.setObjectName("StoragePath")
@@ -1439,6 +2274,38 @@ class HomePage(BasePage):
         """Helper method to get icon path"""
         return self.project_root / "assets" / "icon" / icon_name
 
+    def _load_storage_dir(self) -> Path:
+        """Load storage directory từ config file (ưu tiên storage_path nếu có, rỗng thì dùng AppLocal)"""
+        from PySide6.QtCore import QStandardPaths
+        import json, logging
+        from pathlib import Path
+        logger = logging.getLogger(__name__)
+
+        config_path = self.project_root / "config" / "app_config.json"
+        try:
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    storage_path_str = config.get("storage_path", "").strip()
+                    if storage_path_str:
+                        custom_dir = Path(storage_path_str)
+                        if custom_dir.exists():
+                            logger.info(f"Using custom storage path: {custom_dir}")
+                            return custom_dir
+                        else:
+                            logger.warning(f"Storage_path không tồn tại: {custom_dir}")
+
+            app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+            default_path = Path(app_data) / "OCR-Medical" / "output"
+            default_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Using default AppData directory: {default_path}")
+            return default_path
+        except Exception as e:
+            logger.error(f"Error loading storage directory from config: {str(e)}")
+            fallback = self.project_root / "data" / "output"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
+
     def _show_coming_soon_camera(self):
         """Show coming soon message for camera feature"""
         QMessageBox.information(
@@ -1475,13 +2342,28 @@ class HomePage(BasePage):
             QMessageBox.critical(self, "Error", f"Failed to scan folder: {str(e)}")
 
     def choose_storage_dir(self):
-        """Choose storage directory"""
+        """Choose storage directory and save to config"""
         folder = QFileDialog.getExistingDirectory(self, "Select storage directory")
         if folder:
             try:
                 storage_path = Path(folder)
                 storage_path.mkdir(parents=True, exist_ok=True)
                 self.storage_path.setText(folder)
+                
+                # Lưu vào config
+                config_path = self.project_root / "config" / "app_config.json"
+                config = {}
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                
+                config["storage_dir"] = str(storage_path)
+                
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=2)
+                
+                logger.info(f"Storage directory updated to: {storage_path}")
+                
             except Exception as e:
                 logger.error(f"Error choosing storage directory: {e}")
                 QMessageBox.warning(
@@ -1740,28 +2622,245 @@ class ReviewPage(BasePage):
 **Path:** `ocr_medical/ui/pages/setting_page.py`
 
 ```python
-from PySide6.QtWidgets import QVBoxLayout, QLabel, QComboBox
+from PySide6.QtWidgets import (
+    QVBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton,
+    QFileDialog, QHBoxLayout, QMessageBox, QFrame, QWidget
+)
+from PySide6.QtCore import Qt
+from pathlib import Path
+import json
+import logging
+
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
 
+logger = logging.getLogger(__name__)
+
 
 class SettingPage(BasePage):
+    """Settings Page – configure API, model parameters, and storage directory."""
+
     def __init__(self, theme_manager: ThemeManager, parent=None) -> None:
+        # Header/Divider (title) do BasePage quản lý — KHÔNG style đè
         super().__init__("Settings", theme_manager, parent)
+        self.theme_manager = theme_manager
+        self.config_path = (
+            Path(__file__).resolve().parent.parent.parent / "config" / "app_config.json"
+        )
 
-        # --- Thêm combobox đổi theme ---
-        layout: QVBoxLayout = self.layout()
-        label = QLabel("Theme:")
-        layout.addWidget(label)
+        # Lấy layout chính từ BasePage (đang chứa header + divider)
+        root_layout: QVBoxLayout = self.layout()
+        root_layout.setSpacing(12)
 
-        combo = QComboBox()
-        combo.addItems(["light", "dark"])
-        combo.setCurrentText(theme_manager.get_theme_name())
-        combo.currentTextChanged.connect(theme_manager.set_theme)
-        layout.addWidget(combo)
+        # ===== Load config =====
+        self.config = self._load_config()
 
-        # Nằm chân trang
-        layout.addStretch(1)
+        # ===== Tạo khung nội dung có scope riêng để style =====
+        # => Chỉ style bên trong SettingsForm, không ảnh hưởng header của BasePage
+        self.form = QFrame()
+        self.form.setObjectName("SettingsForm")
+        form_layout = QVBoxLayout(self.form)
+        form_layout.setSpacing(12)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+
+        # =========================
+        # Theme selection
+        # =========================
+        theme_row = QWidget()
+        theme_row_layout = QVBoxLayout(theme_row)
+        theme_row_layout.setContentsMargins(0, 0, 0, 0)
+        theme_row_layout.setSpacing(6)
+
+        theme_label = QLabel("Theme:")
+        theme_row_layout.addWidget(theme_label)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["light", "dark"])
+        self.theme_combo.setCurrentText(self.config.get("theme", "light"))
+        # objectName để style — nhưng đã scope trong #SettingsForm
+        self.theme_combo.setObjectName("SettingComboBox")
+        self.theme_combo.setFocusPolicy(Qt.StrongFocus)
+        # Thay theme khi đổi
+        self.theme_combo.currentTextChanged.connect(self.theme_manager.set_theme)
+        theme_row_layout.addWidget(self.theme_combo)
+
+        form_layout.addWidget(theme_row)
+
+        # =========================
+        # Base URL
+        # =========================
+        base_row = QWidget()
+        base_row_layout = QVBoxLayout(base_row)
+        base_row_layout.setContentsMargins(0, 0, 0, 0)
+        base_row_layout.setSpacing(6)
+
+        base_label = QLabel("API Base URL:")
+        base_row_layout.addWidget(base_label)
+
+        self.base_input = QLineEdit()
+        self.base_input.setObjectName("SettingLineEdit")
+        self.base_input.setPlaceholderText("http://127.0.0.1:1234/v1")
+        self.base_input.setText(self.config.get("base_url", ""))
+        self.base_input.setFocusPolicy(Qt.StrongFocus)
+        self.base_input.setReadOnly(False)
+        self.base_input.setEnabled(True)
+        base_row_layout.addWidget(self.base_input)
+
+        form_layout.addWidget(base_row)
+
+        # =========================
+        # Temperature
+        # =========================
+        temp_row = QWidget()
+        temp_row_layout = QVBoxLayout(temp_row)
+        temp_row_layout.setContentsMargins(0, 0, 0, 0)
+        temp_row_layout.setSpacing(6)
+
+        temp_label = QLabel("Temperature:")
+        temp_row_layout.addWidget(temp_label)
+
+        self.temp_input = QLineEdit()
+        self.temp_input.setObjectName("SettingLineEdit")
+        self.temp_input.setPlaceholderText("0.1")
+        self.temp_input.setText(str(self.config.get("temperature", 0.1)))
+        self.temp_input.setFocusPolicy(Qt.StrongFocus)
+        self.temp_input.setReadOnly(False)
+        self.temp_input.setEnabled(True)
+        temp_row_layout.addWidget(self.temp_input)
+
+        form_layout.addWidget(temp_row)
+
+        # =========================
+        # Max Tokens
+        # =========================
+        token_row = QWidget()
+        token_row_layout = QVBoxLayout(token_row)
+        token_row_layout.setContentsMargins(0, 0, 0, 0)
+        token_row_layout.setSpacing(6)
+
+        token_label = QLabel("Max Tokens:")
+        token_row_layout.addWidget(token_label)
+
+        self.token_input = QLineEdit()
+        self.token_input.setObjectName("SettingLineEdit")
+        self.token_input.setPlaceholderText("1500")
+        self.token_input.setText(str(self.config.get("max_tokens", 1500)))
+        self.token_input.setFocusPolicy(Qt.StrongFocus)
+        self.token_input.setReadOnly(False)
+        self.token_input.setEnabled(True)
+        token_row_layout.addWidget(self.token_input)
+
+        form_layout.addWidget(token_row)
+
+        # =========================
+        # Storage Path
+        # =========================
+        store_row = QWidget()
+        store_layout = QVBoxLayout(store_row)
+        store_layout.setContentsMargins(0, 0, 0, 0)
+        store_layout.setSpacing(6)
+
+        store_label = QLabel("Storage Directory:")
+        store_layout.addWidget(store_label)
+
+        store_input_row = QHBoxLayout()
+        store_input_row.setContentsMargins(0, 0, 0, 0)
+        store_input_row.setSpacing(8)
+
+        self.storage_input = QLineEdit()
+        self.storage_input.setObjectName("SettingLineEdit")
+        self.storage_input.setPlaceholderText("Leave empty to use default AppData directory")
+        self.storage_input.setText(self.config.get("storage_path", ""))
+        self.storage_input.setFocusPolicy(Qt.StrongFocus)
+        self.storage_input.setReadOnly(False)
+        self.storage_input.setEnabled(True)
+
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setObjectName("BrowseButton")
+        browse_btn.setFocusPolicy(Qt.StrongFocus)
+        browse_btn.clicked.connect(self._choose_folder)
+
+        store_input_row.addWidget(self.storage_input)
+        store_input_row.addWidget(browse_btn)
+        store_layout.addLayout(store_input_row)
+
+        form_layout.addWidget(store_row)
+
+
+        form_layout.addStretch(1)
+
+        # =========================
+        # Save button
+        # =========================
+        save_btn = QPushButton("Save Changes")
+        save_btn.setObjectName("SaveButton")
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.setFocusPolicy(Qt.StrongFocus)
+        save_btn.clicked.connect(self._save_config)
+        form_layout.addWidget(save_btn)
+
+        # Thêm form vào root_layout (bên dưới header/divider)
+        root_layout.addWidget(self.form)
+
+        # Giữ chân trang
+        
+
+    # =========================
+    # Config I/O
+    # =========================
+    def _load_config(self) -> dict:
+        """Load configuration from app_config.json."""
+        try:
+            if self.config_path.exists():
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Error reading config: {e}")
+        return {}
+
+    def _save_config(self):
+        """Validate & save all settings to app_config.json."""
+        try:
+            # Validate temperature
+            temp_str = (self.temp_input.text() or "").strip()
+            try:
+                temperature = float(temp_str) if temp_str != "" else 0.1
+            except ValueError:
+                QMessageBox.warning(self, "Invalid input", "Temperature must be a floating-point number.")
+                self.temp_input.setFocus()
+                return
+
+            # Validate max_tokens
+            tok_str = (self.token_input.text() or "").strip()
+            try:
+                max_tokens = int(tok_str) if tok_str != "" else 1500
+            except ValueError:
+                QMessageBox.warning(self, "Invalid input", "Max Tokens must be an integer.")
+                self.token_input.setFocus()
+                return
+
+            # Pack config
+            self.config["theme"] = self.theme_combo.currentText()
+            self.config["base_url"] = self.base_input.text().strip()
+            self.config["temperature"] = temperature
+            self.config["max_tokens"] = max_tokens
+            self.config["storage_path"] = self.storage_input.text().strip()
+
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+
+            QMessageBox.information(self, "Saved", "Settings have been successfully updated.")
+            logger.info("✅ Config saved successfully")
+
+        except Exception as e:
+            logger.error(f"Error saving config: {e}")
+            QMessageBox.critical(self, "Error", f"Unable to save configuration:\n{e}")
+
+    def _choose_folder(self):
+        """Open a folder selection dialog."""
+        folder = QFileDialog.getExistingDirectory(self, "Select storage directory")
+        if folder:
+            self.storage_input.setText(folder)
 
 ```
 
@@ -1777,7 +2876,7 @@ class SettingPage(BasePage):
 
 ```css
 /* ============================================================
-   Extract Info Page – Light theme polished version
+   Extract Info Page – Light theme polished version (updated)
    ============================================================ */
 
 /* --- Layout containers --- */
@@ -1809,7 +2908,6 @@ class SettingPage(BasePage):
 /* ============================================================
    FILE LIST AREA
    ============================================================ */
-
 #FileScroll {
     background: transparent;
     border-left: 1px solid {{ color.border.default }};
@@ -1819,48 +2917,28 @@ class SettingPage(BasePage):
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
 }
-#FileListFrame {
-    border: none;
+
+#FileListContainer {
     background: transparent;
 }
 
-/* --- Header row --- */
 #FileListHeader {
     background: {{ color.background.base }};
     border: 1px solid {{ color.border.default }};
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
     border-bottom: none;
-
     font-weight: 600;
     color: {{ color.text.primary }};
     font-size: {{ typography.normal.size }}px;
 }
-
-/* --- File rows --- */
-#FileListContainer {
-    background: transparent;
-    border: none;
-}
-
 #FileRowItem {
-    border: none;
     border-bottom: 1px solid {{ color.border.default }};
     color: {{ color.text.primary }};
     font-size: {{ typography.normal.size }}px;
 }
-
-#FileRowItem:last-child {
-    border-bottom: none;
-}
-
 #FileRowItem:hover {
     background: {{ color.state.secondary.hover }};
-}
-
-/* --- Status text --- */
-#FileRowItem QLabel {
-    font-size: 13px;
 }
 
 /* ============================================================
@@ -1871,7 +2949,6 @@ class SettingPage(BasePage):
     border-radius: 12px;
     padding: 0;
 }
-
 #TabButton {
     font-weight: 600;
     font-size: {{ typography.normal.size }}px;
@@ -1882,11 +2959,9 @@ class SettingPage(BasePage):
     padding: 12px 6px;
 }
 #TabButton:hover {
-    border: none;
     color: {{ color.text.secondary }};
     border-bottom: 2px solid {{ color.text.secondary }};
 }
-
 #TabButton:checked {
     color: {{ color.text.secondary }};
     border-bottom: 2px solid {{ color.text.secondary }};
@@ -1896,171 +2971,233 @@ class SettingPage(BasePage):
 #ResultBox {
     border: none;
     background: transparent;
-    padding: 60px;
+    padding: 16px;
+}
+QWebEngineView#ResultContent,
+QTextEdit#ResultContent {
+    border: none;
+    background: transparent;
+    outline: none;
+    padding: 8px;
+    color: {{ color.text.primary }};
+    font-size: 15px;
+    font-family: 'Segoe UI', sans-serif;
+}
+#EmptyStateLabel {
+    font-size: 15px;
     color: {{ color.text.muted }};
-    text-align: left;
+    font-style: italic;
+    text-align: center;
 }
 
 /* ============================================================
-   BUTTONS
+   LOADING TEXT
    ============================================================ */
-#MoreButton {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    background: transparent;
-}
-#MoreButton:hover {
-    background: {{ color.background.base }};
-}
-
-#FooterButton, #FooterStopButton, #FooterSaveButton {
-    padding: 8px 16px;
+#LoadingText {
+    font-size: 32px;
     font-weight: 600;
-    font-size: 13px;
-    border-radius: 6px;
-}
-
-#FooterButton {
-    font-weight: 700;   
-    border: 1px solid {{ color.border.default }};
     color: {{ color.text.secondary }};
-    background: #ffffff;
-}
-#FooterButton:hover {
-    background: {{ color.state.secondary.hover }};
+    text-align: center;
+    padding: 8px;
 }
 
+/* ============================================================
+   FOOTER BUTTONS
+   ============================================================ */
+#FooterButton,
+#FooterStopButton,
+#FooterSaveButton,
+#FooterSaveAsButton {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 6px;
+    min-width: 110px;
+    transition: all 0.2s ease-in-out;
+}
+
+/* --- STOP --- */
 #FooterStopButton {
     border: none;
-    color: #ffffff;
+    color: #fff;
     background: #FE2020;
-    font-weight: 700;   
 }
 #FooterStopButton:hover {
-    background: #AFAFAF;
+    background: #FF4D4D;
+    transform: scale(1.03);
 }
 
+/* --- SAVE --- */
 #FooterSaveButton {
     border: none;
     color: #fff;
-    font-weight: 700;   
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #2C7BE5, stop:1 #175CD3);
 }
 #FooterSaveButton:hover {
-    background: #357ABD;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #3D8BFF, stop:1 #1A5BE8);
 }
 
+/* --- SAVE AS --- */
+#FooterSaveAsButton {
+    border: 1px solid {{ color.border.default }};
+    color: {{ color.text.primary }};
+    background: #fff;
+}
+#FooterSaveAsButton:hover {
+    background: #E9F1FF;
+    border: 1px solid #2C7BE5;
+    color: #175CD3;
+}
+
+/* --- DEFAULT BUTTON (Back, etc.) --- */
+#FooterButton {
+    border: 1px solid {{ color.border.default }};
+    color: {{ color.text.secondary }};
+    background: transparent;
+}
+#FooterButton:hover {
+    background: {{ color.state.secondary.active }};
+    color: {{ color.text.secondary }};
+    border-color: {{ color.state.primary.state }};
+}
+
+/* --- DISABLED STATES --- */
+#FooterStopButton:disabled,
+#FooterSaveButton:disabled,
+#FooterSaveAsButton:disabled,
+#FooterButton:disabled {
+    background: #cccccc;
+    color: #999999;
+    box-shadow: none;
+    transform: none;
+}
 ```
 
 ## `file_log_page.qss.tpl`
 **Path:** `ocr_medical/ui/style/pages/file_log_page.qss.tpl`
 
 ```css
-/* File Log Page CSS */
-
-#SearchBar {
-    padding: 6px 10px;
-    border: 1px solid {{ color.border.default }};
-    border-radius: 10px;
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.primary }};
-    background: {{ color.background.panel }};
+#FileLogPage {
+    background: #FFFFFF;
 }
 
-#SearchBar:focus {
-    border: 1px solid {{ color.state.primary.focus }};
-    outline: none;
-}
-
-#RefreshButton {
-    padding: 6px 12px;
-    border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    background: {{ color.background.panel }};
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.primary }};
-}
-
-#RefreshButton:hover {
-    background: {{ color.state.secondary.hover }};
-}
-
-#StatsLabel {
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.muted }};
-    padding: 8px 0;
-}
-
-#LogTable {
+/* Top bar */
+#SearchBar, #SortBox, #RefreshBtn {
     border: 1px solid {{ color.border.default }};
     border-radius: 8px;
-    background: {{ color.background.panel }};
-    gridline-color: {{ color.border.default }};
+    padding: 6px 12px;
+    font-size: 14px;
+    background: #FFFFFF;
+    color: {{ color.text.primary }};
+    min-height: 32px;
 }
-
-#LogTable::item {
-    padding: 8px;
+#SearchBar:focus {
+    border-color: {{ color.border.focus }};
+    background: #FFFFFF;
 }
-
-#LogTable::item:selected {
+#SortBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    width: 24px;
+    border-left: 1px solid {{ color.border.default }};
+}
+#SortBox:hover, #RefreshBtn:hover {
     background: {{ color.state.secondary.active }};
 }
 
-#ViewButton {
-    padding: 4px 12px;
+/* Folder Card */
+#FolderCard {
+    background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
-    border-radius: 4px;
-    background: {{ color.background.panel }};
-    font-size: {{ typography.normal.size }}px;
+    border-radius: 12px;
+}
+#FolderCard:hover {
+    border-color: {{ color.border.drag_area }};
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+#FolderName {
+    font-weight: 700;
+    color: {{ color.text.primary }};
+    font-size: 15px;
+}
+#StatusBadge {
+    color: #FFF;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 10px;
 }
 
-#ViewButton:hover {
-    background: {{ color.state.secondary.hover }};
+/* Buttons */
+QPushButton {
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
 }
-
-#InfoFrame {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    padding: 12px;
-    background: {{ color.background.panel }};
+QPushButton#ViewBtn {
+    background: {{ color.text.secondary }};
+    color: #FFFFFF;
 }
-
-#InfoTitle {
-    font-size: {{ typography.heading2.size }}px;
-    font-weight: {{ typography.heading2.weight }};
+QPushButton#ViewBtn:hover { background: {{ color.state.primary.active }}; }
+QPushButton#DeleteBtn {
+    background: {{ color.border.default }};
     color: {{ color.text.primary }};
 }
+QPushButton#DeleteBtn:hover {
+    background: {{ color.state.secondary.active }};
+}
+QPushButton#RefreshBtn {
+    color: {{ color.text.primary }};
+    background: #FFFFFF;
+}
 
-#FilesList {
+/* Pagination */
+#PageBtn {
+    background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    background: {{ color.background.base }};
+    border-radius: 8px;
+    padding: 6px 16px;
+}
+#PageBtn:hover { background: {{ color.state.secondary.active }}; }
+#PageLbl, #PageInfo {
+    color: {{ color.text.primary }};
+    font-weight: 600;
 }
 
-#DeleteBtn {
-    background: #F44336;
-    color: #ffffff;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 4px;
+/* Detail Dialog */
+#FileDetailDialog {
+    background: #FFFFFF;
 }
-
-#DeleteBtn:hover {
-    background: #D32F2F;
+#LeftPanel, #RightPanel {
+    background: transparent;
 }
-
-#InfoTabs {
-    background: {{ color.background.panel }};
-}
-
-#ExtractedInfoBox, #RawInfoBox {
+#MarkdownEditor {
+    background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    padding: 10px;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 12px;
+    border-radius: 8px;
+    padding: 8px;
+    color: {{ color.text.primary }};
+    font-family: 'Consolas';
+    font-size: 14px;
 }
+#SaveBtn {
+    background: {{ color.text.secondary }};
+    color: #FFFFFF;
+    border-radius: 8px;
+    padding: 8px 16px;
+}
+#SaveBtn:hover {
+    background: {{ color.state.primary.active }};
+}
+#ImageCompare {
+    border: 1px solid {{ color.border.default }};
+    border-radius: 8px;
+    background: #FFFFFF;
+}
+
 ```
 
 ## `home_page.qss.tpl`
@@ -2331,6 +3468,72 @@ class SettingPage(BasePage):
 **Path:** `ocr_medical/ui/style/pages/setting_page.qss.tpl`
 
 ```css
+/* ============================================================
+   Settings Page – scoped styles
+   Only apply to content inside #SettingsForm
+   ============================================================ */
+
+#SettingsForm QLabel {
+    font-size: 15px;
+    font-weight: 600;
+    color: {{ color.text.primary }};
+    margin-top: 6px;
+}
+
+#SettingsForm QLineEdit#SettingLineEdit {
+    background: #fff;
+    border: 1px solid {{ color.border.default }};
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 14px;
+    color: {{ color.text.primary }};
+}
+
+#SettingsForm QLineEdit#SettingLineEdit:focus {
+    border: 1px solid {{ color.border.focus }};
+}
+
+#SettingsForm QComboBox#SettingComboBox {
+    background: #fff;
+    border: 1px solid {{ color.border.default }};
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 14px;
+}
+
+#SettingsForm QComboBox#SettingComboBox::drop-down {
+    width: 24px;
+    border: none;
+}
+
+#SettingsForm QPushButton#BrowseButton {
+    padding: 8px 16px;
+    border: 1px solid {{ color.border.default }};
+    border-radius: 6px;
+    background: #f8f9fa;
+}
+
+#SettingsForm QPushButton#BrowseButton:hover {
+    background: #e9ecef;
+}
+
+#SettingsForm QPushButton#SaveButton {
+    margin-top: 16px;
+    padding: 8px 16px;
+    font-weight: 700;
+    border-radius: 6px;
+    color: #fff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #2C7BE5, stop:1 #175CD3);
+}
+
+#SettingsForm QPushButton#SaveButton:hover {
+    background: #357ABD;
+}
+
+#SettingsForm QPushButton#SaveButton:pressed {
+    background: #2C5AA0;
+}
 
 ```
 
@@ -2699,8 +3902,12 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QSizePolicy, QSpacer
 
 from ocr_medical.ui.style.style_loader import load_svg_colored
 from ocr_medical.ui.style.theme_manager import ThemeManager
+from ocr_medical.utils.path_helper import resource_path
 
 
+# ============================================================
+#                     NavButton
+# ============================================================
 class NavButton(QWidget):
     """Custom nav button với icon đổi màu theo trạng thái"""
 
@@ -2723,9 +3930,8 @@ class NavButton(QWidget):
         self.active_color = theme_data["color"]["text"]["secondary"]
 
         # Set icon mặc định
-        if icon_path.exists():
-            self.btn.setIcon(load_svg_colored(
-                icon_path, self.normal_color, 20))
+        if self.icon_path.exists():
+            self.btn.setIcon(load_svg_colored(self.icon_path, self.normal_color, 20))
             self.btn.setIconSize(QSize(20, 20))
 
         # Khi toggle (active)
@@ -2747,24 +3953,24 @@ class NavButton(QWidget):
     def _on_enter(self, event):
         """Đổi màu icon khi hover"""
         if self.icon_path.exists() and not self.btn.isChecked():
-            self.btn.setIcon(load_svg_colored(
-                self.icon_path, self.hover_color, 20))
+            self.btn.setIcon(load_svg_colored(self.icon_path, self.hover_color, 20))
         QPushButton.enterEvent(self.btn, event)
 
     def _on_leave(self, event):
         """Trả lại màu icon khi rời hover"""
         if self.icon_path.exists() and not self.btn.isChecked():
-            self.btn.setIcon(load_svg_colored(
-                self.icon_path, self.normal_color, 20))
+            self.btn.setIcon(load_svg_colored(self.icon_path, self.normal_color, 20))
         QPushButton.leaveEvent(self.btn, event)
 
 
+# ============================================================
+#                     SidePanel
+# ============================================================
 class SidePanel(QWidget):
     page_selected = Signal(str)
 
     def __init__(self, project_root: Path, theme_manager: ThemeManager, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-
         self.setObjectName("SidePanel")
 
         self.theme_manager = theme_manager
@@ -2777,17 +3983,15 @@ class SidePanel(QWidget):
         layout.setSpacing(12)
 
         # --- Logo ---
-        logo_path = project_root / "assets" / "logo" / "logo-text.png"
+        logo_path = resource_path("ocr_medical/assets/logo/logo-text.png")
         logo_label = QLabel()
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
-            logo_label.setPixmap(logo_pixmap.scaledToWidth(
-                100, Qt.SmoothTransformation))
+            logo_label.setPixmap(logo_pixmap.scaledToWidth(100, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignLeft)
         layout.addWidget(logo_label)
 
-        layout.addItem(QSpacerItem(
-            0, 60, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        layout.addItem(QSpacerItem(0, 60, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
         # --- Navigation buttons ---
         self.buttons: dict[str, NavButton] = {}
@@ -2800,10 +4004,9 @@ class SidePanel(QWidget):
         ]
 
         for key, text, icon_file in pages:
-            icon_path = project_root / "assets" / "icon" / icon_file
+            icon_path = resource_path(f"ocr_medical/assets/icon/{icon_file}")
             nav_btn = NavButton(key, text, icon_path, theme_data)
-            nav_btn.btn.clicked.connect(
-                lambda checked, k=key: self.page_selected.emit(k))
+            nav_btn.btn.clicked.connect(lambda checked, k=key: self.page_selected.emit(k))
 
             layout.addWidget(nav_btn.widget())
             self.buttons[key] = nav_btn
@@ -2811,12 +4014,11 @@ class SidePanel(QWidget):
         layout.addStretch(1)
 
         # --- User info at bottom ---
-        user_icon_path = project_root / "assets" / "icon" / "user.svg"
+        user_icon_path = resource_path("ocr_medical/assets/icon/user.svg")
         user_icon_label = QLabel()
         if user_icon_path.exists():
             user_icon_label.setPixmap(
-                load_svg_colored(
-                    user_icon_path, theme_data["color"]["text"]["primary"], 24).pixmap(24, 24)
+                load_svg_colored(user_icon_path, theme_data["color"]["text"]["primary"], 24).pixmap(24, 24)
             )
         user_icon_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(user_icon_label)
@@ -2847,9 +4049,11 @@ class SidePanel(QWidget):
 
 ```python
 from __future__ import annotations
-from pathlib import Path
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QStackedWidget, QFrame
+
+from pathlib import Path
 
 from ocr_medical.ui.widgets.side_panel import SidePanel
 from ocr_medical.ui.pages.home_page import HomePage
@@ -2884,6 +4088,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.project_root = project_root
         self.setWindowTitle("OCR-Medical")
+
+        logo_path = self.project_root / "assets" / "logo" / "logo.png"
+        if logo_path.exists():
+            self.setWindowIcon(QIcon(str(logo_path)))
 
         self.theme_manager = ThemeManager(theme_name)
         self.theme_manager.theme_changed.connect(self.apply_theme)
@@ -2929,11 +4137,12 @@ class MainWindow(QMainWindow):
 
         self._add_page("setting", SettingPage(self.theme_manager))
         self._add_page("file_log", FileLogPage(self.theme_manager))
-        
+
         extract_page = ExtraInfoPage(self.theme_manager)
-        extract_page.navigate_back_requested.connect(lambda: self.navigate_to("home"))
+        extract_page.navigate_back_requested.connect(
+            lambda: self.navigate_to("home"))
         self._add_page("extra_info", extract_page)
-        
+
         self._add_page("review", ReviewPage(self.theme_manager))
 
         self.side_panel.page_selected.connect(self.navigate_to)
@@ -2944,11 +4153,11 @@ class MainWindow(QMainWindow):
             self.theme_manager.get_theme_data(),
             self.theme_manager.get_theme_name()
         )
-        self.disable_focus_policy()
+
     def disable_focus_policy(self):
         """Disable focus policy cho toàn bộ ứng dụng"""
         self.set_focus_policy_recursive(self, Qt.NoFocus)
-    
+
     @staticmethod
     def set_focus_policy_recursive(widget, policy):
         """Recursively set focus policy cho tất cả children"""
@@ -2975,6 +4184,7 @@ class MainWindow(QMainWindow):
     def apply_theme(self, theme_data: dict, theme_name: str) -> None:
         qss = load_theme_qss(theme_name)
         self.setStyleSheet(qss)
+
 ```
 
 ## `main.py`
@@ -3059,31 +4269,87 @@ from pathlib import Path
 from urllib.parse import urlparse
 from io import BytesIO
 import requests
+import json
 from PIL import Image
+from PySide6.QtCore import QStandardPaths
+
 from ocr_medical.core.waifu2x_loader import load_waifu2x
 from ocr_medical.core.process_image import process_image
 from ocr_medical.core.ocr_extract import call_qwen_ocr
 from ocr_medical.core.status import status_manager
+from ocr_medical.utils.path_helper import resource_path
 
-# Output mặc định: OCR-Medical/data/output/
+# ============================================================
+# 📁 Project root (được dùng khi fallback)
+# ============================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "output"   # 📌 sửa lại đường dẫn để nằm trong data/output
 
-# 📌 Prompt mặc định
+# ============================================================
+# 🧠 Prompt mặc định cho OCR
+# ============================================================
 DEFAULT_PROMPT = (
-    "Hãy trích xuất toàn bộ dữ liệu bảng trong ảnh và trình bày lại dưới dạng bảng Markdown. "
-    "Yêu cầu định dạng rõ ràng như sau:\n"
-    "- Hàng tiêu đề in đậm.\n"
-    "- Các cột căn chỉnh bằng dấu | với khoảng trắng đều.\n"
-    "- Các mục quan trọng (ví dụ MIỄN DỊCH, PXN VI SINH) phải in đậm.\n"
-    "- Giữ nguyên ký hiệu đặc biệt (ví dụ dấu * phải hiển thị là \\*).\n"
-    "- Giá trị số giữ nguyên định dạng, đơn vị hiển thị đúng như trong ảnh.\n"
-    "Chỉ trả về bảng Markdown, không thêm lời giải thích."
+    "Hãy trích xuất toàn bộ nội dung văn bản có trong ảnh, bao gồm cả chữ, số, ký hiệu đặc biệt "
+    "và các cấu trúc bảng nếu có. "
+    "Yêu cầu trình bày kết quả như sau:\n"
+    "1. Nếu ảnh chứa bảng dữ liệu:\n"
+    "   - Trình bày lại dưới dạng **bảng Markdown** với định dạng rõ ràng.\n"
+    "   - Hàng tiêu đề in đậm.\n"
+    "   - Các cột căn chỉnh bằng dấu | và khoảng trắng đều.\n"
+    "   - Các mục quan trọng (ví dụ: MIỄN DỊCH, PXN VI SINH) phải in đậm.\n"
+    "   - Giữ nguyên ký hiệu đặc biệt (ví dụ dấu * phải hiển thị là \\*).\n"
+    "   - Giá trị số và đơn vị giữ nguyên định dạng gốc.\n"
+    "2. Nếu ảnh **không chứa bảng** mà chỉ có đoạn văn, chữ viết hoặc ký tự rời:\n"
+    "   - Hãy trích xuất toàn bộ văn bản đúng theo thứ tự hiển thị từ trên xuống dưới, trái sang phải.\n"
+    "   - Giữ nguyên ngắt dòng, dấu câu và ký hiệu đặc biệt.\n"
+    "   - Không thêm lời giải thích hay định dạng Markdown.\n"
+    "Kết quả chỉ bao gồm phần nội dung đã trích xuất, không thêm mô tả hoặc phân tích."
 )
 
+
+# ============================================================
+# 📦 Lấy thư mục output mặc định từ config
+# ============================================================
+def get_default_output() -> Path:
+    """
+    Load default output directory từ config file.
+    Nếu không có thì dùng AppData hoặc fallback về project/data/output.
+    """
+    try:
+        config_path = resource_path("ocr_medical/config/app_config.json")
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                storage_dir_str = config.get("storage_path", "")
+
+                if storage_dir_str and storage_dir_str.strip():
+                    storage_path = Path(storage_dir_str)
+                    storage_path.mkdir(parents=True, exist_ok=True)
+                    return storage_path
+
+        # Nếu không có config hoặc storage_path trống → AppData
+        app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+        default_path = Path(app_data) / "OCR-Medical" / "output"
+        default_path.mkdir(parents=True, exist_ok=True)
+        return default_path
+
+    except Exception as e:
+        # Nếu lỗi, fallback về thư mục dự án
+        status_manager.add(f"⚠️ Lỗi load storage path: {e}")
+        fallback_path = PROJECT_ROOT / "data" / "output"
+        fallback_path.mkdir(parents=True, exist_ok=True)
+        return fallback_path
+
+
+# 🗂️ Output mặc định
+DEFAULT_OUTPUT = get_default_output()
+
+
+# ============================================================
+# ✏️ Gọi OCR và lưu kết quả Markdown
+# ============================================================
 def save_text(processed_path: Path, img_name: str, output_root: Path):
     """
-    Gọi OCR và lưu kết quả Markdown
+    Gọi OCR và lưu kết quả Markdown.
     """
     try:
         out_dir_text = output_root / img_name / "text"
@@ -3094,49 +4360,391 @@ def save_text(processed_path: Path, img_name: str, output_root: Path):
         with open(ocr_path, "w", encoding="utf-8") as f:
             f.write(extracted)
 
-        status_manager.add("✅ Lưu OCR (text)")
+        status_manager.add(f"✅ Đã lưu kết quả OCR: {ocr_path.name}")
     except Exception as e:
         status_manager.add(f"❌ Lỗi lưu OCR: {e}")
         raise
 
+
+# ============================================================
+# 🔄 Pipeline chính
+# ============================================================
 def process_input(input_path: str, output_root: str = None):
     """
     Pipeline OCR:
-    - Input: file ảnh, folder, URL
+    - Input: file ảnh, folder, hoặc URL
     - Output: original, processed, text (.md)
     """
     status_manager.reset()
     output_root = Path(output_root) if output_root else DEFAULT_OUTPUT
     upscaler = load_waifu2x()
 
-    # Nếu là URL
-    if input_path.startswith(("http://", "https://")):
-        response = requests.get(input_path)
-        response.raise_for_status()
-        img = Image.open(BytesIO(response.content)).convert("RGB")
-        img_name = Path(urlparse(input_path).path).stem
-        _, proc_path = process_image(upscaler, img, img_name, output_root)
-        save_text(proc_path, img_name, output_root)
+    try:
+        # Nếu là URL
+        if input_path.startswith(("http://", "https://")):
+            response = requests.get(input_path)
+            response.raise_for_status()
+            img = Image.open(BytesIO(response.content)).convert("RGB")
+            img_name = Path(urlparse(input_path).path).stem
+            _, proc_path = process_image(upscaler, img, img_name, output_root)
+            save_text(proc_path, img_name, output_root)
+            return status_manager
+
+        # Nếu là file ảnh
+        p = Path(input_path)
+        if p.is_file():
+            img = Image.open(p).convert("RGB")
+            img_name = p.stem
+            _, proc_path = process_image(upscaler, img, img_name, output_root)
+            save_text(proc_path, img_name, output_root)
+
+        # Nếu là thư mục
+        elif p.is_dir():
+            for file in p.glob("*.*"):
+                if file.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]:
+                    img = Image.open(file).convert("RGB")
+                    img_name = file.stem
+                    _, proc_path = process_image(upscaler, img, img_name, output_root)
+                    save_text(proc_path, img_name, output_root)
+        else:
+            status_manager.add(f"❌ Input không tồn tại: {input_path}")
+            raise FileNotFoundError(f"Input {input_path} không tồn tại")
+
         return status_manager
 
-    p = Path(input_path)
-    if p.is_file():
-        img = Image.open(p).convert("RGB")
-        img_name = p.stem
-        _, proc_path = process_image(upscaler, img, img_name, output_root)
-        save_text(proc_path, img_name, output_root)
+    except Exception as e:
+        status_manager.add(f"❌ Pipeline error: {e}")
+        raise
 
-    elif p.is_dir():
-        for file in p.glob("*.*"):
-            if file.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]:
-                img = Image.open(file).convert("RGB")
-                img_name = file.stem
-                _, proc_path = process_image(upscaler, img, img_name, output_root)
-                save_text(proc_path, img_name, output_root)
-    else:
-        status_manager.add(f"❌ Input {input_path} không tồn tại")
-        raise FileNotFoundError(f"Input {input_path} không tồn tại")
+```
 
-    return status_manager
+## `ocr_extract.py`
+**Path:** `ocr_medical/core/ocr_extract.py`
+
+```python
+import base64
+import json
+import requests
+from pathlib import Path
+from ocr_medical.core.status import status_manager
+from ocr_medical.utils.path_helper import resource_path
+
+
+# =====================================================
+#   Load configuration safely (for .py and .exe)
+# =====================================================
+def load_config() -> dict:
+    """
+    Đọc config từ ocr_medical/config/app_config.json
+    (tự động tương thích PyInstaller)
+    """
+    config_path = resource_path("ocr_medical/config/app_config.json")
+
+    try:
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                status_manager.add("⚙️ Config loaded successfully.")
+                return data
+        else:
+            status_manager.add("⚠️ Config file not found, using defaults.")
+            return {}
+    except Exception as e:
+        status_manager.add(f"❌ Error reading config: {e}")
+        return {}
+
+
+# =====================================================
+#   Global configuration values
+# =====================================================
+CONFIG = load_config()
+
+BASE_URL = CONFIG.get("base_url", "http://127.0.0.1:1234/v1")
+MODEL_ID = CONFIG.get("model_id", "qwen/qwen2.5-vl-7b")
+TEMPERATURE = CONFIG.get("temperature", 0.1)
+MAX_TOKENS = CONFIG.get("max_tokens", 1500)
+STREAM = CONFIG.get("stream", False)
+IS_MAXIMIZED = CONFIG.get("is_maximized", True)
+
+
+# =====================================================
+#   Helper functions
+# =====================================================
+def infer_mime_from_filename(filename: str) -> str:
+    low = filename.lower()
+    if low.endswith(".png"):
+        return "image/png"
+    if low.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if low.endswith(".webp"):
+        return "image/webp"
+    return "application/octet-stream"
+
+
+def to_data_url(path: str) -> str:
+    """
+    Đọc file ảnh và encode thành data URL (base64)
+    """
+    try:
+        abs_path = Path(path).resolve()
+        if not abs_path.exists():
+            raise FileNotFoundError(f"Image not found: {abs_path}")
+        mime = infer_mime_from_filename(abs_path.name)
+        with open(abs_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        status_manager.add(f"❌ Error encoding image: {e}")
+        raise
+
+
+# =====================================================
+#   OCR call to Qwen API
+# =====================================================
+def call_qwen_ocr(image_path: str, prompt_text: str) -> str:
+    """
+    Gọi API Qwen OCR với ảnh đã xử lý (png/jpg/jpeg/webp)
+    """
+    url = f"{BASE_URL}/chat/completions"
+    image_url = to_data_url(image_path)
+
+    payload = {
+        "model": MODEL_ID,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+        "temperature": TEMPERATURE,
+        "max_tokens": MAX_TOKENS,
+        "stream": STREAM,
+    }
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        status_manager.add(f"🔄 Sending OCR request: {Path(image_path).name}")
+        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=180)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if "choices" not in data or not data["choices"]:
+            raise ValueError("Invalid OCR response (no 'choices').")
+
+        result = data["choices"][0]["message"]["content"]
+        status_manager.add("✅ OCR completed successfully.")
+        return result
+
+    except requests.exceptions.ConnectionError:
+        status_manager.add("❌ Connection failed. Check BASE_URL or network.")
+        raise
+    except Exception as e:
+        status_manager.add(f"❌ OCR failed: {e}")
+        raise
+
+
+# =====================================================
+#   Window state helper
+# =====================================================
+def get_window_state():
+    """
+    Trả về trạng thái hiển thị mặc định khi khởi động app
+    """
+    if IS_MAXIMIZED:
+        return "maximized"
+    return "normal"
+
+```
+
+## `process_image.py`
+**Path:** `ocr_medical/core/process_image.py`
+
+```python
+from pathlib import Path
+from PIL import Image
+from ocr_medical.core.status import status_manager
+
+
+def save_original(img: Image.Image, img_name: str, output_root: Path) -> Path:
+    """
+    Lưu ảnh gốc vào output/{img_name}/original
+    """
+    try:
+        out_dir = output_root / img_name / "original"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{img_name}_original.png"
+        img.save(path)
+        status_manager.add("✅ Lưu ảnh gốc (original)")
+        return path
+    except Exception as e:
+        status_manager.add(f"❌ Lỗi lưu ảnh gốc: {e}")
+        raise
+
+
+def enhance_image(upscaler, img: Image.Image, img_name: str, output_root: Path) -> Path:
+    """
+    Xử lý ảnh bằng Waifu2x và lưu vào output/{img_name}/processed
+    """
+    try:
+        out_dir = output_root / img_name / "processed"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        enhanced = upscaler(img)
+        path = out_dir / f"{img_name}_processed.png"
+        enhanced.save(path)
+        status_manager.add("✅ Xử lý ảnh (processed)")
+        return path
+    except Exception as e:
+        status_manager.add(f"❌ Lỗi xử lý ảnh: {e}")
+        raise
+
+
+def process_image(upscaler, img: Image.Image, img_name: str, output_root: Path) -> tuple[Path, Path]:
+    """
+    Trả về (path ảnh gốc, path ảnh đã xử lý)
+    """
+    orig = save_original(img, img_name, output_root)
+    proc = enhance_image(upscaler, img, img_name, output_root)
+    return orig, proc
+
+```
+
+## `status.py`
+**Path:** `ocr_medical/core/status.py`
+
+```python
+from typing import List
+
+class StatusManager:
+    """
+    Quản lý thông báo cho pipeline.
+    """
+    def __init__(self):
+        self.messages: List[str] = []
+        self.logs: List[str] = []
+        self.state: str = ""
+
+    def add(self, msg: str):
+        print(msg)
+        self.messages.append(msg)
+        self.logs.append(msg)
+        self.state = msg
+
+    def reset(self):
+        self.messages.clear()
+        self.logs.clear()
+        self.state = ""
+
+# Singleton
+status_manager = StatusManager()
+```
+
+## `waifu2x_loader.py`
+**Path:** `ocr_medical/core/waifu2x_loader.py`
+
+```python
+import torch
+import json
+import logging
+from pathlib import Path
+from ocr_medical.core.status import status_manager
+
+logger = logging.getLogger(__name__)
+
+# ============================================================
+#  Utility: Device selection
+# ============================================================
+def get_device_from_config():
+    """Chọn thiết bị dựa theo app_config.json (auto / cpu / cuda)."""
+    try:
+        config_path = Path(__file__).resolve().parent.parent / "config" / "app_config.json"
+        device_pref = "auto"
+
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                device_pref = cfg.get("device_preference", "auto").lower()
+
+        if device_pref == "cpu":
+            device = torch.device("cpu")
+            status_manager.add("⚙️ Running on CPU (forced by config)")
+        elif device_pref == "cuda":
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+                status_manager.add("🚀 Using GPU (CUDA) as configured")
+            else:
+                device = torch.device("cpu")
+                status_manager.add("⚠️ GPU not available. Falling back to CPU.")
+        else:  # auto
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device.type == "cuda":
+                status_manager.add("🚀 GPU detected — using CUDA for processing")
+            else:
+                status_manager.add("⚙️ No GPU found — using CPU")
+
+        logger.info(f"[Waifu2x] Selected device: {device}")
+        return device
+
+    except Exception as e:
+        logger.error(f"Error reading config for device selection: {e}")
+        status_manager.add("⚠️ Defaulting to CPU due to config error")
+        return torch.device("cpu")
+
+
+# ============================================================
+#  Main: Load Waifu2x model
+# ============================================================
+def load_waifu2x(
+    # ---- Model options ----
+    model_type="art_scan",     # 'art', 'photo', 'art_scan'
+    method="noise_scale",      # 'scale', 'noise', 'noise_scale', 'auto_scale'
+    noise_level=3,             # -1=off, 0=none, 1=low, 2=medium, 3=high
+    scale=2,                   # 1, 1.6, 2, 4
+
+    # ---- Performance options ----
+    tile_size=64,              # 64/128/256 (smaller for low VRAM)
+    batch_size=4,              # parallel tiles
+    amp=True,                  # use FP16 if available
+    source="github",           # model source
+    repo="nagadomi/nunif",     # repo or local model path
+):
+    """
+    Load the Waifu2x model dynamically via torch.hub with auto GPU/CPU selection.
+    """
+    try:
+        # Tự chọn thiết bị
+        device = get_device_from_config()
+        device_ids = [0] if device.type == "cuda" else [-1]
+
+        status_manager.add("🔄 Loading Waifu2x model...")
+
+        upscaler = torch.hub.load(
+            repo,
+            'waifu2x',
+            source=source,
+            model_type=model_type,
+            method=method,
+            noise_level=noise_level,
+            scale=scale,
+            tile_size=tile_size,
+            batch_size=batch_size,
+            device_ids=device_ids,
+            amp=amp
+        )
+
+        # Nếu model hỗ trợ .to(device)
+        if hasattr(upscaler, "to"):
+            upscaler = upscaler.to(device)
+
+        status_manager.add(f"✅ Waifu2x model loaded successfully on {device.type.upper()}")
+        logger.info(f"[Waifu2x] Model ready on {device.type}")
+        return upscaler
+
+    except Exception as e:
+        status_manager.add(f"❌ Failed to load Waifu2x model: {e}")
+        logger.error(f"[Waifu2x] Error: {e}")
+        raise
 
 ```

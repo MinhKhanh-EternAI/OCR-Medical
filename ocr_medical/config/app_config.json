@@ -1,12 +1,9 @@
 {
-  "last_screen": 0,
-  "geometry": [
-    0,
-    23,
-    1920,
-    1009
-  ],
-  "is_maximized": true,
-  "is_fullscreen": false,
-  "theme": "light"
+  "base_url": "http://192.168.1.12:1234/v1",
+  "temperature": 0.1,
+  "max_tokens": 1500,
+  "stream": false,
+  "storage_path": "",
+  "theme": "light",
+  "is_maximized": true
 }

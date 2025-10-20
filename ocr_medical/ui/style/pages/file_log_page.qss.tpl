@@ -1,104 +1,118 @@
-/* File Log Page CSS */
-
-#SearchBar {
-    padding: 6px 10px;
-    border: 1px solid {{ color.border.default }};
-    border-radius: 10px;
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.primary }};
-    background: {{ color.background.panel }};
+#FileLogPage {
+    background: #FFFFFF;
 }
 
-#SearchBar:focus {
-    border: 1px solid {{ color.state.primary.focus }};
-    outline: none;
-}
-
-#RefreshButton {
-    padding: 6px 12px;
-    border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    background: {{ color.background.panel }};
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.primary }};
-}
-
-#RefreshButton:hover {
-    background: {{ color.state.secondary.hover }};
-}
-
-#StatsLabel {
-    font-size: {{ typography.normal.size }}px;
-    color: {{ color.text.muted }};
-    padding: 8px 0;
-}
-
-#LogTable {
+/* Top bar */
+#SearchBar, #SortBox, #RefreshBtn {
     border: 1px solid {{ color.border.default }};
     border-radius: 8px;
-    background: {{ color.background.panel }};
-    gridline-color: {{ color.border.default }};
+    padding: 6px 12px;
+    font-size: 14px;
+    background: #FFFFFF;
+    color: {{ color.text.primary }};
+    min-height: 32px;
 }
-
-#LogTable::item {
-    padding: 8px;
+#SearchBar:focus {
+    border-color: {{ color.border.focus }};
+    background: #FFFFFF;
 }
-
-#LogTable::item:selected {
+#SortBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    width: 24px;
+    border-left: 1px solid {{ color.border.default }};
+}
+#SortBox:hover, #RefreshBtn:hover {
     background: {{ color.state.secondary.active }};
 }
 
-#ViewButton {
-    padding: 4px 12px;
+/* Folder Card */
+#FolderCard {
+    background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
-    border-radius: 4px;
-    background: {{ color.background.panel }};
-    font-size: {{ typography.normal.size }}px;
+    border-radius: 12px;
+}
+#FolderCard:hover {
+    border-color: {{ color.border.drag_area }};
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+#FolderName {
+    font-weight: 700;
+    color: {{ color.text.primary }};
+    font-size: 15px;
+}
+#StatusBadge {
+    color: #FFF;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 10px;
 }
 
-#ViewButton:hover {
-    background: {{ color.state.secondary.hover }};
+/* Buttons */
+QPushButton {
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
 }
-
-#InfoFrame {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 8px;
-    padding: 12px;
-    background: {{ color.background.panel }};
+QPushButton#ViewBtn {
+    background: {{ color.text.secondary }};
+    color: #FFFFFF;
 }
-
-#InfoTitle {
-    font-size: {{ typography.heading2.size }}px;
-    font-weight: {{ typography.heading2.weight }};
+QPushButton#ViewBtn:hover { background: {{ color.state.primary.active }}; }
+QPushButton#DeleteBtn {
+    background: {{ color.border.default }};
     color: {{ color.text.primary }};
 }
+QPushButton#DeleteBtn:hover {
+    background: {{ color.state.secondary.active }};
+}
+QPushButton#RefreshBtn {
+    color: {{ color.text.primary }};
+    background: #FFFFFF;
+}
 
-#FilesList {
+/* Pagination */
+#PageBtn {
+    background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    background: {{ color.background.base }};
+    border-radius: 8px;
+    padding: 6px 16px;
+}
+#PageBtn:hover { background: {{ color.state.secondary.active }}; }
+#PageLbl, #PageInfo {
+    color: {{ color.text.primary }};
+    font-weight: 600;
 }
 
-#DeleteBtn {
-    background: #F44336;
-    color: #ffffff;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 4px;
+/* Detail Dialog */
+#FileDetailDialog {
+    background: #FFFFFF;
 }
-
-#DeleteBtn:hover {
-    background: #D32F2F;
+#LeftPanel, #RightPanel {
+    background: transparent;
 }
-
-#InfoTabs {
-    background: {{ color.background.panel }};
-}
-
-#ExtractedInfoBox, #RawInfoBox {
+#MarkdownEditor {
+    background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
-    padding: 10px;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 12px;
+    border-radius: 8px;
+    padding: 8px;
+    color: {{ color.text.primary }};
+    font-family: 'Consolas';
+    font-size: 14px;
+}
+#SaveBtn {
+    background: {{ color.text.secondary }};
+    color: #FFFFFF;
+    border-radius: 8px;
+    padding: 8px 16px;
+}
+#SaveBtn:hover {
+    background: {{ color.state.primary.active }};
+}
+#ImageCompare {
+    border: 1px solid {{ color.border.default }};
+    border-radius: 8px;
+    background: #FFFFFF;
 }
