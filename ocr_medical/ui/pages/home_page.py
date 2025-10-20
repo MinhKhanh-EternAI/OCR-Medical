@@ -508,21 +508,20 @@ class HomePage(BasePage):
                 storage_path = Path(folder)
                 storage_path.mkdir(parents=True, exist_ok=True)
                 self.storage_path.setText(folder)
-                
-                # Lưu vào config
+
+                # Lưu vào config (đúng khóa: storage_path)
                 config_path = self.project_root / "config" / "app_config.json"
                 config = {}
                 if config_path.exists():
                     with open(config_path, "r", encoding="utf-8") as f:
                         config = json.load(f)
-                
-                config["storage_dir"] = str(storage_path)
-                
+
+                config["storage_path"] = str(storage_path)
+
                 with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(config, f, indent=2)
-                
+                    json.dump(config, f, indent=2, ensure_ascii=False)
+
                 logger.info(f"Storage directory updated to: {storage_path}")
-                
             except Exception as e:
                 logger.error(f"Error choosing storage directory: {e}")
                 QMessageBox.warning(
@@ -530,6 +529,7 @@ class HomePage(BasePage):
                     "Error",
                     f"Cannot access or create the selected folder:\n{str(e)}"
                 )
+
 
     def add_files(self, paths: list[Path]):
         """Add files to the list"""

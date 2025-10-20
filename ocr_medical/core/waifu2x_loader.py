@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 from ocr_medical.core.status import status_manager
+from ocr_medical.utils.path_helper import resource_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def get_device_from_config():
 
 
 # ============================================================
-#  Main: Load Waifu2x model
+#  Main: Load Waifu2x model (Local first, fallback GitHub)
 # ============================================================
 def load_waifu2x(
     # ---- Model options ----
@@ -60,42 +61,66 @@ def load_waifu2x(
     tile_size=64,              # 64/128/256 (smaller for low VRAM)
     batch_size=4,              # parallel tiles
     amp=True,                  # use FP16 if available
-    source="github",           # model source
-    repo="nagadomi/nunif",     # repo or local model path
 ):
     """
-    Load the Waifu2x model dynamically via torch.hub with auto GPU/CPU selection.
+    Load Waifu2x model — ưu tiên local repo, fallback GitHub nếu thiếu.
     """
     try:
-        # Tự chọn thiết bị
         device = get_device_from_config()
         device_ids = [0] if device.type == "cuda" else [-1]
 
-        status_manager.add("🔄 Loading Waifu2x model...")
+        # ==== ƯU TIÊN LOCAL ====
+        local_repo = resource_path("ocr_medical/core/models/nunif/nagadomi_nunif_master")
 
-        upscaler = torch.hub.load(
-            repo,
-            'waifu2x',
-            source=source,
-            model_type=model_type,
-            method=method,
-            noise_level=noise_level,
-            scale=scale,
-            tile_size=tile_size,
-            batch_size=batch_size,
-            device_ids=device_ids,
-            amp=amp
-        )
+        if Path(local_repo).exists() and (Path(local_repo) / "waifu2x" / "hubconf.py").exists():
+            status_manager.add("📦 Loading Waifu2x model from local repository...")
+            logger.info(f"[Waifu2x] Loading local repo at: {local_repo}")
 
-        # Nếu model hỗ trợ .to(device)
+            upscaler = torch.hub.load(
+                str(local_repo),
+                'waifu2x',
+                source='local',
+                model_type=model_type,
+                method=method,
+                noise_level=noise_level,
+                scale=scale,
+                tile_size=tile_size,
+                batch_size=batch_size,
+                amp=amp
+            )
+
+            status_manager.add("✅ Waifu2x model loaded successfully (LOCAL mode).")
+            logger.info("[Waifu2x] Model loaded locally.")
+        else:
+            # ==== FALLBACK ONLINE ====
+            status_manager.add("🌐 Local repo missing — downloading via torch.hub...")
+            logger.warning("[Waifu2x] Local repo not found. Downloading from GitHub...")
+
+            upscaler = torch.hub.load(
+                'nagadomi/nunif',
+                'waifu2x',
+                source='github',
+                model_type=model_type,
+                method=method,
+                noise_level=noise_level,
+                scale=scale,
+                tile_size=tile_size,
+                batch_size=batch_size,
+                amp=amp
+            )
+
+            status_manager.add("✅ Waifu2x model downloaded successfully (ONLINE mode).")
+            logger.info("[Waifu2x] Model downloaded from GitHub.")
+
+        # ==== Chuyển thiết bị (GPU/CPU) ====
         if hasattr(upscaler, "to"):
             upscaler = upscaler.to(device)
 
-        status_manager.add(f"✅ Waifu2x model loaded successfully on {device.type.upper()}")
+        status_manager.add(f"🚀 Ready — Waifu2x running on {device.type.upper()}")
         logger.info(f"[Waifu2x] Model ready on {device.type}")
         return upscaler
 
     except Exception as e:
+        logger.error(f"[Waifu2x] Error loading model: {e}")
         status_manager.add(f"❌ Failed to load Waifu2x model: {e}")
-        logger.error(f"[Waifu2x] Error: {e}")
         raise
