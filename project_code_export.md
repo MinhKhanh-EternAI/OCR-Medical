@@ -167,124 +167,47 @@ class BasePage(QWidget):
 from __future__ import annotations
 from PySide6.QtWidgets import (
     QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QFrame,
-    QStackedWidget, QScrollArea, QWidget, QTextBrowser
+    QStackedWidget, QScrollArea, QWidget, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal, QSize, QThread
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, Signal, QSize
 from pathlib import Path
-import logging
 
 from ocr_medical.ui.pages.base_page import BasePage
 from ocr_medical.ui.style.theme_manager import ThemeManager
 from ocr_medical.ui.style.style_loader import load_svg_colored
-from ocr_medical.core.pipeline import process_input
-
-logger = logging.getLogger(__name__)
 
 
 # =====================================================
-#             OCR Worker Thread
-# =====================================================
-class OCRWorker(QThread):
-    """Worker thread để xử lý OCR không block UI"""
-    
-    progress = Signal(int, str)  # (index, status)
-    result = Signal(int, str, str)  # (index, markdown_text, image_path)
-    finished = Signal()
-    error = Signal(int, str)  # (index, error_message)
-    
-    def __init__(self, files: list[Path], output_root: Path):
-        super().__init__()
-        self.files = files
-        self.output_root = output_root
-        self._is_running = True
-    
-    def run(self):
-        """Xử lý từng file"""
-        for idx, file_path in enumerate(self.files):
-            if not self._is_running:
-                break
-            
-            try:
-                # Update status: processing
-                self.progress.emit(idx, "processing")
-                
-                # Process với pipeline
-                logger.info(f"Processing file {idx + 1}/{len(self.files)}: {file_path.name}")
-                process_input(str(file_path), str(self.output_root))
-                
-                # Đọc kết quả markdown
-                img_name = file_path.stem
-                md_path = self.output_root / img_name / "text" / f"{img_name}_processed.md"
-                processed_img = self.output_root / img_name / "processed" / f"{img_name}_processed.png"
-                
-                markdown_text = ""
-                if md_path.exists():
-                    markdown_text = md_path.read_text(encoding="utf-8")
-                
-                # Emit result
-                self.result.emit(idx, markdown_text, str(processed_img))
-                self.progress.emit(idx, "completed")
-                
-            except Exception as e:
-                logger.error(f"Error processing {file_path.name}: {e}")
-                self.error.emit(idx, str(e))
-                self.progress.emit(idx, "failed")
-        
-        self.finished.emit()
-    
-    def stop(self):
-        """Dừng worker"""
-        self._is_running = False
-
-
-# =====================================================
-#             File Row Item (with status update)
+#             File Row Item (giống HomePage)
 # =====================================================
 class FileRowItem(QFrame):
-    """Một hàng trong danh sách file: index, file name, status"""
-    
+    """Một hàng trong danh sách file gồm: index, file name, status"""
     def __init__(self, index: int, file_name: str, state: str, project_root: Path):
         super().__init__()
         self.setObjectName("FileRowItem")
         self.project_root = project_root
-        self.current_state = state
 
-        self.layout_main = QHBoxLayout(self)
-        self.layout_main.setContentsMargins(12, 6, 12, 6)
-        self.layout_main.setSpacing(0)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(0)
 
-        # ----- Column 1: Index -----
-        self.index_lbl = QLabel(str(index))
-        self.index_lbl.setObjectName("FileIndex")
-        self.index_lbl.setAlignment(Qt.AlignCenter)
-        self.layout_main.addWidget(self.index_lbl, 1)
+        # ----- Cột 1: Index -----
+        index_lbl = QLabel(str(index))
+        index_lbl.setObjectName("FileIndex")
+        index_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(index_lbl, 1)
 
-        # ----- Column 2: File Name -----
-        self.name_lbl = QLabel(file_name)
-        self.name_lbl.setObjectName("FileName")
-        self.layout_main.addWidget(self.name_lbl, 5)
+        # ----- Cột 2: File Name -----
+        name_lbl = QLabel(file_name)
+        name_lbl.setObjectName("FileName")
+        layout.addWidget(name_lbl, 5)
 
-        # ----- Column 3: Status -----
-        self.status_container = QWidget()
-        self.status_layout = QHBoxLayout(self.status_container)
-        self.status_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_layout.setSpacing(4)
-        self.layout_main.addWidget(self.status_container, 3)
-        
-        self.update_status(state)
+        # ----- Cột 3: Status -----
+        status_widget = self._create_status_label(state)
+        layout.addWidget(status_widget, 3)
 
-    def update_status(self, state: str):
-        """Cập nhật trạng thái hiển thị"""
-        self.current_state = state
-        
-        # Clear old widgets
-        while self.status_layout.count():
-            item = self.status_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
-        # Create new status display
+    def _create_status_label(self, state: str) -> QWidget:
+        """Tạo icon tròn + chữ trạng thái"""
         color_map = {
             "waiting": ("#A0A0A0", "Waiting"),
             "processing": ("#FB923C", "Processing"),
@@ -301,11 +224,16 @@ class FileRowItem(QFrame):
         icon_lbl.setFixedWidth(14)
 
         text_lbl = QLabel(text)
-        text_lbl.setStyleSheet(f"color: {color}; font-weight: 500;")
+        text_lbl.setStyleSheet("color: #475569; font-weight: 500;")
 
-        self.status_layout.addWidget(icon_lbl)
-        self.status_layout.addWidget(text_lbl)
-        self.status_layout.addStretch()
+        container = QWidget()
+        lay = QHBoxLayout(container)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        lay.addWidget(icon_lbl)
+        lay.addWidget(text_lbl)
+        lay.addStretch()
+        return container
 
 
 # =====================================================
@@ -313,18 +241,15 @@ class FileRowItem(QFrame):
 # =====================================================
 class ExtraInfoPage(BasePage):
     navigate_back_requested = Signal()
-    
+    stop_ocr_requested = Signal()
+    save_requested = Signal()
+
     def __init__(self, theme_manager: ThemeManager, parent=None):
         super().__init__("Extraction Info", theme_manager, parent)
 
         self.theme_manager = theme_manager
         self.theme_data = theme_manager.get_theme_data()
         self.project_root = Path(__file__).resolve().parent.parent.parent
-
-        self.files = []
-        self.file_items = []
-        self.worker = None
-        self.current_preview_index = 0
 
         layout = self.layout()
         layout.setSpacing(6)
@@ -340,6 +265,17 @@ class ExtraInfoPage(BasePage):
         header_layout.setSpacing(8)
         header_layout.addWidget(self.header, stretch=1)
 
+        self.more_btn = QPushButton()
+        self.more_btn.setObjectName("MoreButton")
+        self.more_btn.setFixedSize(32, 32)
+        self.more_btn.setCursor(Qt.PointingHandCursor)
+
+        more_icon = self.project_root / "assets" / "icon" / "more.svg"
+        if more_icon.exists():
+            self.more_btn.setIcon(
+                load_svg_colored(more_icon, self.theme_data["color"]["text"]["primary"], 18)
+            )
+        header_layout.addWidget(self.more_btn)
         layout.insertLayout(0, header_layout)
         layout.insertWidget(1, self.divider)
 
@@ -366,8 +302,6 @@ class ExtraInfoPage(BasePage):
         self.preview_box = QLabel()
         self.preview_box.setObjectName("PreviewBox")
         self.preview_box.setAlignment(Qt.AlignCenter)
-        self.preview_box.setScaledContents(False)
-        self.preview_box.setFixedSize(600, 400)  # ✅ Kích thước cố định
 
         no_img_path = self.project_root / "assets" / "icon" / "no_image.svg"
         if no_img_path.exists():
@@ -382,7 +316,7 @@ class ExtraInfoPage(BasePage):
         file_list_layout.setContentsMargins(0, 0, 0, 0)
         file_list_layout.setSpacing(0)
 
-        # Header
+        # Header (giống HomePage)
         header_row = QFrame()
         header_row.setObjectName("FileListHeader")
         h_layout = QHBoxLayout(header_row)
@@ -447,7 +381,7 @@ class ExtraInfoPage(BasePage):
 
         for btn in (self.tab1_btn, self.tab2_btn):
             btn.setObjectName("TabButton")
-            btn.setCursor(Qt.PointingHandCursor)  # ✅ Hand cursor
+            btn.setCursor(Qt.PointingHandCursor)
             btn.setCheckable(True)
             btn.setFlat(True)
             btn.setMinimumHeight(32)
@@ -457,21 +391,15 @@ class ExtraInfoPage(BasePage):
         tab_layout.addLayout(tab_buttons_layout)
 
         self.tab_stack = QStackedWidget()
-        
-        # Tab 1: Rendered Markdown
-        self.markdown_preview = QTextBrowser()
-        self.markdown_preview.setObjectName("ResultBox")
-        self.markdown_preview.setMarkdown("_No content yet. Start processing to see results._")
-        
-        # Tab 2: Raw Text
-        self.raw_text_area = QTextBrowser()
-        self.raw_text_area.setObjectName("ResultBox")
-        self.raw_text_area.setPlainText("No content yet. Start processing to see results.")
-        
-        self.tab_stack.addWidget(self.markdown_preview)
-        self.tab_stack.addWidget(self.raw_text_area)
+        tab1 = QLabel("📄 Rendered Markdown Preview Area")
+        tab1.setObjectName("ResultBox")
+        tab1.setAlignment(Qt.AlignCenter)
+        tab2 = QLabel("✏️ Raw Markdown Text Area")
+        tab2.setObjectName("ResultBox")
+        tab2.setAlignment(Qt.AlignCenter)
+        self.tab_stack.addWidget(tab1)
+        self.tab_stack.addWidget(tab2)
         tab_layout.addWidget(self.tab_stack)
-        
         self.tab1_btn.clicked.connect(lambda: self._switch_tab(0))
         self.tab2_btn.clicked.connect(lambda: self._switch_tab(1))
         right_layout.addWidget(tab_container)
@@ -488,32 +416,23 @@ class ExtraInfoPage(BasePage):
         footer.setContentsMargins(0, 10, 0, 0)
         footer.setSpacing(10)
 
-        # ✅ Back Button (no icon)
         self.back_btn = QPushButton("Back")
         self.back_btn.setObjectName("FooterButton")
-        self.back_btn.setCursor(Qt.PointingHandCursor)
+        self.back_btn.setIcon(load_svg_colored(self.project_root / "assets" / "icon" / "back-page.svg", "#175CD3", 16))
+        self.back_btn.setIconSize(QSize(16, 16))
         self.back_btn.clicked.connect(lambda: self.navigate_back_requested.emit())
 
-        # ✅ Stop OCR Button (no icon)
         self.stop_btn = QPushButton("Stop OCR")
         self.stop_btn.setObjectName("FooterStopButton")
-        self.stop_btn.setCursor(Qt.PointingHandCursor)
-        self.stop_btn.clicked.connect(self._stop_ocr)
-        self.stop_btn.setEnabled(False)
+        self.stop_btn.setIcon(load_svg_colored(self.project_root / "assets" / "icon" / "stop_ocr.svg", "#777777", 16))
+        self.stop_btn.setIconSize(QSize(16, 16))
+        self.stop_btn.clicked.connect(lambda: self.stop_ocr_requested.emit())
 
-        # ✅ Save As Button (NEW)
-        self.save_as_btn = QPushButton("Save As")
-        self.save_as_btn.setObjectName("FooterSaveAsButton")
-        self.save_as_btn.setCursor(Qt.PointingHandCursor)
-        self.save_as_btn.clicked.connect(self._save_as)
-        self.save_as_btn.setEnabled(False)
-
-        # ✅ Save Button (renamed from Save Changes)
-        self.save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("Save Changes")
         self.save_btn.setObjectName("FooterSaveButton")
-        self.save_btn.setCursor(Qt.PointingHandCursor)
-        self.save_btn.clicked.connect(self._save_changes)
-        self.save_btn.setEnabled(False)
+        self.save_btn.setIcon(load_svg_colored(self.project_root / "assets" / "icon" / "save.svg", "#FFFFFF", 16))
+        self.save_btn.setIconSize(QSize(16, 16))
+        self.save_btn.clicked.connect(lambda: self.save_requested.emit())
 
         left_group = QHBoxLayout()
         left_group.setSpacing(8)
@@ -521,7 +440,6 @@ class ExtraInfoPage(BasePage):
         left_group.addWidget(self.stop_btn)
         footer.addLayout(left_group)
         footer.addStretch(1)
-        footer.addWidget(self.save_as_btn, alignment=Qt.AlignRight)
         footer.addWidget(self.save_btn, alignment=Qt.AlignRight)
         layout.addLayout(footer)
 
@@ -533,27 +451,12 @@ class ExtraInfoPage(BasePage):
         self.tab1_btn.setChecked(index == 0)
         self.tab2_btn.setChecked(index == 1)
 
-    def load_files(self, files: list[Path], output_root: Path = None):
-        """Hiển thị danh sách file và tự động bắt đầu xử lý"""
+    def load_files(self, files: list[Path]):
+        """Hiển thị danh sách file theo cấu trúc mới"""
         self.clear_files()
-        self.files = files
-        self.file_items = []
-        
-        # Tạo file items
         for idx, f in enumerate(files, start=1):
             row = FileRowItem(idx, f.name, "waiting", self.project_root)
             self.file_container_layout.addWidget(row)
-            self.file_items.append(row)
-        
-        # Hiển thị preview của file đầu tiên
-        if files:
-            self._show_preview(0)
-        
-        # Tự động bắt đầu xử lý
-        if output_root is None:
-            output_root = self.project_root / "data" / "output"
-        
-        self._start_processing(files, output_root)
 
     def clear_files(self):
         """Xóa toàn bộ hàng file hiện tại"""
@@ -562,105 +465,7 @@ class ExtraInfoPage(BasePage):
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-        self.file_items = []
 
-    def _show_preview(self, index: int):
-        """Hiển thị preview của file tại index"""
-        if 0 <= index < len(self.files):
-            file_path = self.files[index]
-            try:
-                pixmap = QPixmap(str(file_path))
-                if not pixmap.isNull():
-                    scaled = pixmap.scaled(
-                        self.preview_box.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                    self.preview_box.setPixmap(scaled)
-                    self.current_preview_index = index
-            except Exception as e:
-                logger.error(f"Error loading preview: {e}")
-
-    def _start_processing(self, files: list[Path], output_root: Path):
-        """Bắt đầu xử lý OCR với worker thread"""
-        if self.worker and self.worker.isRunning():
-            logger.warning("OCR is already running!")
-            return
-        
-        self.worker = OCRWorker(files, output_root)
-        self.worker.progress.connect(self._on_progress)
-        self.worker.result.connect(self._on_result)
-        self.worker.error.connect(self._on_error)
-        self.worker.finished.connect(self._on_finished)
-        
-        self.stop_btn.setEnabled(True)
-        self.worker.start()
-        
-        logger.info(f"Started OCR processing for {len(files)} files")
-
-    def _stop_ocr(self):
-        """Dừng xử lý OCR"""
-        if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait()
-            self.stop_btn.setEnabled(False)
-            logger.info("OCR processing stopped by user")
-
-    def _on_progress(self, index: int, status: str):
-        """Callback khi status thay đổi"""
-        if 0 <= index < len(self.file_items):
-            self.file_items[index].update_status(status)
-            
-            # Hiển thị preview khi bắt đầu xử lý
-            if status == "processing":
-                self._show_preview(index)
-
-    def _on_result(self, index: int, markdown_text: str, processed_image: str):
-        """Callback khi có kết quả OCR"""
-        logger.info(f"Received result for file {index + 1}")
-        
-        # Hiển thị markdown
-        self.markdown_preview.setMarkdown(markdown_text)
-        self.raw_text_area.setPlainText(markdown_text)
-        
-        # Hiển thị processed image
-        if Path(processed_image).exists():
-            pixmap = QPixmap(processed_image)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    self.preview_box.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.preview_box.setPixmap(scaled)
-        
-        self.save_btn.setEnabled(True)
-        self.save_as_btn.setEnabled(True)
-
-    def _on_error(self, index: int, error_msg: str):
-        """Callback khi có lỗi"""
-        logger.error(f"Error processing file {index + 1}: {error_msg}")
-
-    def _on_finished(self):
-        """Callback khi hoàn thành tất cả"""
-        self.stop_btn.setEnabled(False)
-        
-        completed = sum(1 for item in self.file_items if item.current_state == "completed")
-        failed = sum(1 for item in self.file_items if item.current_state == "failed")
-        
-        logger.info(f"OCR processing complete: {completed} succeeded, {failed} failed")
-
-    def _save_changes(self):
-        """Lưu thay đổi"""
-        logger.info("Save button clicked - results already saved to output directory")
-
-    def _save_as(self):
-        """Lưu vào vị trí khác"""
-        from PySide6.QtWidgets import QFileDialog
-        folder = QFileDialog.getExistingDirectory(self, "Select folder to save")
-        if folder:
-            logger.info(f"Save As to: {folder}")
-            # TODO: Implement save as logic
 ```
 
 ## `file_log_page.py`
@@ -1803,7 +1608,8 @@ class SettingPage(BasePage):
 #PreviewBox {
     border: 1px solid {{ color.border.default }};
     border-radius: 12px;
-    padding: 12px;
+    background: #ffffff;
+    padding: 60px;
 }
 
 /* ============================================================
@@ -1826,7 +1632,7 @@ class SettingPage(BasePage):
 
 /* --- Header row --- */
 #FileListHeader {
-    background: {{ color.background.base }};
+    background: {{ color.state.secondary.hover }};
     border: 1px solid {{ color.border.default }};
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
@@ -1845,7 +1651,7 @@ class SettingPage(BasePage):
 
 #FileRowItem {
     border: none;
-    border-bottom: 1px solid {{ color.border.default }};
+    border-bottom: 1px solid #E5E7EB;
     color: {{ color.text.primary }};
     font-size: {{ typography.normal.size }}px;
 }
@@ -1869,6 +1675,7 @@ class SettingPage(BasePage):
 #TabContainer {
     border: 1px solid {{ color.border.default }};
     border-radius: 12px;
+    background: #ffffff;
     padding: 0;
 }
 
@@ -1877,16 +1684,13 @@ class SettingPage(BasePage):
     font-size: {{ typography.normal.size }}px;
     color: {{ color.text.primary }};
     border: none;
-    border-bottom: 2px solid {{ color.border.default }};
+    border-bottom: 2px solid transparent;
     background: transparent;
-    padding: 12px 6px;
+    padding: 8px;
 }
 #TabButton:hover {
-    border: none;
-    color: {{ color.text.secondary }};
-    border-bottom: 2px solid {{ color.text.secondary }};
+    background: {{ color.state.secondary.hover }};
 }
-
 #TabButton:checked {
     color: {{ color.text.secondary }};
     border-bottom: 2px solid {{ color.text.secondary }};
@@ -1898,30 +1702,31 @@ class SettingPage(BasePage):
     background: transparent;
     padding: 60px;
     color: {{ color.text.muted }};
-    text-align: left;
+    text-align: center;
 }
 
 /* ============================================================
    BUTTONS
    ============================================================ */
 #MoreButton {
-    border: 1px solid {{ color.border.default }};
-    border-radius: 6px;
+    border: none;
     background: transparent;
 }
 #MoreButton:hover {
-    background: {{ color.background.base }};
-}
-
-#FooterButton, #FooterStopButton, #FooterSaveButton {
-    padding: 8px 16px;
-    font-weight: 600;
-    font-size: 13px;
+    background: {{ color.state.secondary.hover }};
     border-radius: 6px;
 }
 
+#FooterButton, #FooterStopButton, #FooterSaveButton {
+    min-height: 32px;
+    min-width: 110px;
+    font-weight: 600;
+    font-size: 13px;
+    border-radius: 6px;
+    padding: 4px 10px;
+}
+
 #FooterButton {
-    font-weight: 700;   
     border: 1px solid {{ color.border.default }};
     color: {{ color.text.secondary }};
     background: #ffffff;
@@ -1933,8 +1738,7 @@ class SettingPage(BasePage):
 #FooterStopButton {
     border: none;
     color: #ffffff;
-    background: #FE2020;
-    font-weight: 700;   
+    background: #C1C1C1;
 }
 #FooterStopButton:hover {
     background: #AFAFAF;
@@ -1943,7 +1747,6 @@ class SettingPage(BasePage):
 #FooterSaveButton {
     border: none;
     color: #fff;
-    font-weight: 700;   
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
         stop:0 #2C7BE5, stop:1 #175CD3);
 }
