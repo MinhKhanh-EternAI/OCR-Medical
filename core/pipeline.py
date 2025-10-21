@@ -48,7 +48,9 @@ def get_default_output() -> Path:
     Nếu không có thì dùng AppData hoặc fallback về project/data/output.
     """
     try:
-        config_path = resource_path("ocr_medical/config/app_config.json")
+        # 🔧 CHỈNH LẠI ĐƯỜNG DẪN CHO ĐÚNG
+        config_path = resource_path("config/app_config.json")
+
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
