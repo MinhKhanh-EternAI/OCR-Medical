@@ -1,7 +1,7 @@
 from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
-from ocr_medical.ui.style.style_loader import load_theme_qss
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_theme_qss
+from ui.style.theme_manager import ThemeManager
 
 
 # Map tên class của page với tên file QSS tương ứng

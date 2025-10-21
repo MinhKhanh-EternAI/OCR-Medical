@@ -4,9 +4,9 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QSizePolicy, QSpacerItem, QPushButton
 
-from ocr_medical.ui.style.style_loader import load_svg_colored
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.utils.path_helper import resource_path
+from ui.style.style_loader import load_svg_colored
+from ui.style.theme_manager import ThemeManager
+from utils.path_helper import resource_path
 
 
 # ============================================================

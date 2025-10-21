@@ -1,6 +1,6 @@
 from pathlib import Path
 from PIL import Image
-from ocr_medical.core.status import status_manager
+from core.status import status_manager
 
 
 def save_original(img: Image.Image, img_name: str, output_root: Path) -> Path:

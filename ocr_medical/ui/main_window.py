@@ -5,14 +5,14 @@ from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QStackedWidget,
 
 from pathlib import Path
 
-from ocr_medical.ui.widgets.side_panel import SidePanel
-from ocr_medical.ui.pages.home_page import HomePage
-from ocr_medical.ui.pages.setting_page import SettingPage
-from ocr_medical.ui.pages.file_log_page import FileLogPage
-from ocr_medical.ui.pages.extract_info_page import ExtraInfoPage
-from ocr_medical.ui.pages.review_page import ReviewPage
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_theme_qss
+from ui.widgets.side_panel import SidePanel
+from ui.pages.home_page import HomePage
+from ui.pages.setting_page import SettingPage
+from ui.pages.file_log_page import FileLogPage
+from ui.pages.extract_info_page import ExtraInfoPage
+from ui.pages.review_page import ReviewPage
+from ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_theme_qss
 
 
 MARGIN = 24

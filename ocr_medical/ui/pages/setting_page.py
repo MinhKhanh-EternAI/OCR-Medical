@@ -7,8 +7,8 @@ from pathlib import Path
 import json
 import logging
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
