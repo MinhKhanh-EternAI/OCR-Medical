@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QGuiApplication
-from ocr_medical.ui.main_window import MainWindow
+from ui.main_window import MainWindow
 
 CONFIG_FILE = Path(__file__).resolve().parent / "config" / "app_config.json"
 

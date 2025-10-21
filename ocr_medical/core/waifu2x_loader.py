@@ -1,9 +1,10 @@
+
 import torch
 import json
 import logging
 from pathlib import Path
-from ocr_medical.core.status import status_manager
-from ocr_medical.utils.path_helper import resource_path
+from core.status import status_manager
+from utils.path_helper import resource_path
 
 logger = logging.getLogger(__name__)
 

@@ -6,11 +6,11 @@ import json
 from PIL import Image
 from PySide6.QtCore import QStandardPaths
 
-from ocr_medical.core.waifu2x_loader import load_waifu2x
-from ocr_medical.core.process_image import process_image
-from ocr_medical.core.ocr_extract import call_qwen_ocr
-from ocr_medical.core.status import status_manager
-from ocr_medical.utils.path_helper import resource_path
+from core.waifu2x_loader import load_waifu2x
+from core.process_image import process_image
+from core.ocr_extract import call_qwen_ocr
+from core.status import status_manager
+from utils.path_helper import resource_path
 
 # ============================================================
 # 📁 Project root (được dùng khi fallback)

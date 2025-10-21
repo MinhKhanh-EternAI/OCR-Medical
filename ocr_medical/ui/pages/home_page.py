@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QSize, QStandardPaths
@@ -11,10 +12,10 @@ import os
 import logging
 import json
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_svg_colored
-from ocr_medical.ui.widgets.dialog_manager import DialogManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_svg_colored
+from ui.widgets.dialog_manager import DialogManager
 
 # ============= CONSTANTS =============
 VALID_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}

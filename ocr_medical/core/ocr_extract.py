@@ -2,8 +2,9 @@ import base64
 import json
 import requests
 from pathlib import Path
-from ocr_medical.core.status import status_manager
-from ocr_medical.utils.path_helper import resource_path
+from 
+core.status import status_manager
+from utils.path_helper import resource_path
 
 
 # =====================================================

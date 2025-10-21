@@ -10,8 +10,8 @@ from datetime import datetime
 import shutil
 import logging
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 6

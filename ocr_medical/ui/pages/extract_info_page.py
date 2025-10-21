@@ -11,9 +11,9 @@ import logging
 import markdown
 import json
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_svg_colored
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_svg_colored
 import sys
 
 logger = logging.getLogger(__name__)
@@ -43,9 +43,9 @@ class OCRWorker(QThread):
         self._force_stop = False
 
     def run(self):
-        from ocr_medical.core.waifu2x_loader import load_waifu2x
-        from ocr_medical.core.process_image import process_image
-        from ocr_medical.core.ocr_extract import call_qwen_ocr
+        from core.waifu2x_loader import load_waifu2x
+        from core.process_image import process_image
+        from core.ocr_extract import call_qwen_ocr
         from PIL import Image
 
         try:
@@ -100,7 +100,7 @@ class OCRWorker(QThread):
 
                     # Bước 3: Extract information (OCR)
                     self.step_progress.emit(idx, "extract_info")
-                    from ocr_medical.core.pipeline import DEFAULT_PROMPT
+                    from core.pipeline import DEFAULT_PROMPT
                     out_dir_text = self.output_root / img_name / "text"
                     out_dir_text.mkdir(parents=True, exist_ok=True)
 
