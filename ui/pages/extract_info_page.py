@@ -25,13 +25,12 @@ logger = logging.getLogger(__name__)
 class OCRWorker(QThread):
     """Worker thread để xử lý OCR không block UI"""
 
-    progress = Signal(int, str)  # (index, status)
-    # (index, step: "load_model", "process_image", "extract_info", "success")
+    progress = Signal(int, str)
     step_progress = Signal(int, str)
-    result = Signal(int, str, str)  # (index, markdown_text, image_path)
+    result = Signal(int, str, str)
     finished = Signal()
     error = Signal(int, str)
-    stopped = Signal()  # Signal khi bị dừng
+    stopped = Signal()
 
     def __init__(self, files: list[Path], output_root: Path, page_instance=None, file_indices: list[int] = None):
         super().__init__()
@@ -46,13 +45,13 @@ class OCRWorker(QThread):
         from core.waifu2x_loader import load_waifu2x
         from core.process_image import process_image
         from core.ocr_extract import call_qwen_ocr
+        from core.pipeline import DEFAULT_PROMPT
         from PIL import Image
 
         try:
             # Xác định danh sách file cần xử lý
             if self.file_indices:
-                files_to_process = [(idx, self.files[idx])
-                                    for idx in self.file_indices]
+                files_to_process = [(idx, self.files[idx]) for idx in self.file_indices]
             else:
                 files_to_process = list(enumerate(self.files))
 
@@ -67,7 +66,6 @@ class OCRWorker(QThread):
                 return
 
             for i, (idx, file_path) in enumerate(files_to_process):
-                # Kiểm tra force stop ở đầu mỗi vòng lặp
                 if self._force_stop or not self._is_running:
                     logger.info(f"OCR stopped at file {idx}")
                     self.stopped.emit()
@@ -75,10 +73,8 @@ class OCRWorker(QThread):
 
                 try:
                     self.progress.emit(idx, "processing")
-                    logger.info(
-                        f"Processing file {idx + 1}/{len(self.files)}: {file_path.name}")
+                    logger.info(f"Processing file {idx + 1}/{len(self.files)}: {file_path.name}")
 
-                    # Nếu không phải file đầu tiên, vẫn emit load_model nhưng nhanh hơn
                     if i > 0 and self._is_running:
                         self.step_progress.emit(idx, "load_model")
                         self.msleep(300)
@@ -91,8 +87,7 @@ class OCRWorker(QThread):
                     self.step_progress.emit(idx, "process_image")
                     img = Image.open(file_path).convert("RGB")
                     img_name = file_path.stem
-                    _, processed_path = process_image(
-                        upscaler, img, img_name, self.output_root)
+                    _, processed_path = process_image(upscaler, img, img_name, self.output_root)
 
                     if not self._is_running:
                         self.stopped.emit()
@@ -100,34 +95,38 @@ class OCRWorker(QThread):
 
                     # Bước 3: Extract information (OCR)
                     self.step_progress.emit(idx, "extract_info")
-                    from core.pipeline import DEFAULT_PROMPT
+                    
+                    # 🔥 FIX: Tạo thư mục text trước khi lưu
                     out_dir_text = self.output_root / img_name / "text"
                     out_dir_text.mkdir(parents=True, exist_ok=True)
 
-                    extracted = call_qwen_ocr(
-                        str(processed_path), DEFAULT_PROMPT)
+                    # Gọi OCR
+                    extracted = call_qwen_ocr(str(processed_path), DEFAULT_PROMPT)
 
                     if not self._is_running:
                         self.stopped.emit()
                         return
 
+                    # 🔥 FIX: LƯU FILE MARKDOWN NGAY SAU KHI OCR XONG
                     md_path = out_dir_text / f"{img_name}_processed.md"
                     with open(md_path, "w", encoding="utf-8") as f:
                         f.write(extracted)
+                    
+                    logger.info(f"✅ Saved markdown to: {md_path}")
 
-                    markdown_text = extracted
-                    processed_img = self.output_root / img_name / \
-                        "processed" / f"{img_name}_processed.png"
+                    # Đường dẫn ảnh processed
+                    processed_img = self.output_root / img_name / "processed" / f"{img_name}_processed.png"
 
                     # Bước 4: Success
                     self.step_progress.emit(idx, "success")
-                    self.msleep(1500)  # Hiển thị success 1.5 giây
+                    self.msleep(1500)
 
                     if not self._is_running:
                         self.stopped.emit()
                         return
 
-                    self.result.emit(idx, markdown_text, str(processed_img))
+                    # 🔥 FIX: Emit kết quả với text đã lưu
+                    self.result.emit(idx, extracted, str(processed_img))
                     self.progress.emit(idx, "completed")
 
                 except Exception as e:
@@ -151,10 +150,23 @@ class OCRWorker(QThread):
         logger.info("OCR Worker stop requested")
 
     def terminate_worker(self):
-        """Buộc dừng worker ngay lập tức (sử dụng trong trường hợp khẩn cấp)"""
+        """Buộc dừng worker ngay lập tức"""
         self._force_stop = True
         self._is_running = False
-        self.terminate()  # Force terminate thread
+        self.terminate()
+        logger.warning("OCR Worker force terminated")
+
+    def stop(self):
+        """Dừng worker một cách an toàn"""
+        self._is_running = False
+        self._force_stop = True
+        logger.info("OCR Worker stop requested")
+
+    def terminate_worker(self):
+        """Buộc dừng worker ngay lập tức"""
+        self._force_stop = True
+        self._is_running = False
+        self.terminate()
         logger.warning("OCR Worker force terminated")
 
 
@@ -844,23 +856,45 @@ class ExtraInfoPage(BasePage):
 
         if idx not in self.file_md_paths:
             logger.warning(f"No markdown file path for index {idx}")
-            return
+            # 🔥 FIX: Tạo path nếu chưa có
+            if idx < len(self.files):
+                img_name = self.files[idx].stem
+                md_path = self.output_root / img_name / "text" / f"{img_name}_processed.md"
+                md_path.parent.mkdir(parents=True, exist_ok=True)
+                self.file_md_paths[idx] = md_path
+            else:
+                return
 
         md_path = self.file_md_paths[idx]
         text = self.raw_text_area.toPlainText()
 
         try:
+            # 🔥 FIX: Đảm bảo thư mục tồn tại
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(text)
-            logger.info(f"Saved markdown to: {md_path}")
+            
+            logger.info(f"✅ Saved markdown to: {md_path}")
 
-            # Cập nhật cache
+            # 🔥 FIX: Cập nhật cache đúng cách
             if idx in self.results_cache:
                 _, img_path = self.results_cache[idx]
                 self.results_cache[idx] = (text, img_path)
+            else:
+                # Nếu chưa có trong cache, tạo mới
+                img_name = self.files[idx].stem
+                processed_img = self.output_root / img_name / "processed" / f"{img_name}_processed.png"
+                self.results_cache[idx] = (text, str(processed_img))
+
+            # 🔥 FIX: Hiển thị thông báo thành công
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Saved", f"Markdown saved successfully to:\n{md_path}")
 
         except Exception as e:
-            logger.error(f"Error saving markdown: {str(e)}")
+            logger.error(f"❌ Error saving markdown: {str(e)}")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to save markdown:\n{str(e)}")
 
     def _save_as_markdown(self):
         """Lưu nội dung markdown vào file mới"""
@@ -1040,21 +1074,22 @@ class ExtraInfoPage(BasePage):
         self.file_items[idx].update_status("completed")
         self.file_status[idx] = "completed"
 
-        # Lưu đường dẫn file markdown
+        # 🔥 FIX: Lưu đường dẫn file markdown ngay khi có kết quả
         img_name = self.files[idx].stem
-        md_path = self.output_root / img_name / \
-            "text" / f"{img_name}_processed.md"
+        md_path = self.output_root / img_name / "text" / f"{img_name}_processed.md"
         self.file_md_paths[idx] = md_path
+        
+        logger.info(f"📄 Markdown file path stored: {md_path}")
 
         # Chỉ hiển thị kết quả nếu đang xem file này
         if idx == self.current_preview_index:
             self._show_result_content()
-            html = markdown.markdown(
-                text, extensions=["tables", "fenced_code", "nl2br"])
+            html = markdown.markdown(text, extensions=["tables", "fenced_code", "nl2br"])
             self.markdown_preview.setHtml(html)
             self.raw_text_area.setPlainText(text)
             self._show_preview(idx, processed=True)
 
+        # 🔥 FIX: Enable nút save ngay khi có kết quả đầu tiên
         self.save_btn.setEnabled(True)
         self.save_as_btn.setEnabled(True)
 

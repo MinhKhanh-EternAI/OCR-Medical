@@ -11,10 +11,10 @@ from utils.path_helper import resource_path
 # =====================================================
 def load_config() -> dict:
     """
-    Đọc config từ ocr_medical/config/app_config.json
+    Đọc config từ config/app_config.json
     (tự động tương thích PyInstaller)
     """
-    config_path = resource_path("ocr_medical/config/app_config.json")
+    config_path = resource_path("config/app_config.json")
 
     try:
         if config_path.exists():
@@ -31,16 +31,14 @@ def load_config() -> dict:
 
 
 # =====================================================
-#   Global configuration values
+#   Get config values (RELOAD mỗi lần gọi)
 # =====================================================
-CONFIG = load_config()
-
-BASE_URL = CONFIG.get("base_url", "http://127.0.0.1:1234/v1")
-MODEL_ID = CONFIG.get("model_id", "qwen/qwen2.5-vl-7b")
-TEMPERATURE = CONFIG.get("temperature", 0.1)
-MAX_TOKENS = CONFIG.get("max_tokens", 1500)
-STREAM = CONFIG.get("stream", False)
-IS_MAXIMIZED = CONFIG.get("is_maximized", True)
+def get_config_value(key: str, default):
+    """
+    Đọc config real-time để luôn lấy giá trị mới nhất
+    """
+    config = load_config()
+    return config.get(key, default)
 
 
 # =====================================================
@@ -81,11 +79,18 @@ def call_qwen_ocr(image_path: str, prompt_text: str) -> str:
     """
     Gọi API Qwen OCR với ảnh đã xử lý (png/jpg/jpeg/webp)
     """
-    url = f"{BASE_URL}/chat/completions"
+    # 🔥 RELOAD config mỗi lần gọi để lấy giá trị mới nhất
+    base_url = get_config_value("base_url", "http://127.0.0.1:1234/v1")
+    model_id = get_config_value("model_id", "qwen/qwen2.5-vl-7b")
+    temperature = get_config_value("temperature", 0.1)
+    max_tokens = get_config_value("max_tokens", 1500)
+    stream = get_config_value("stream", False)
+
+    url = f"{base_url}/chat/completions"
     image_url = to_data_url(image_path)
 
     payload = {
-        "model": MODEL_ID,
+        "model": model_id,
         "messages": [
             {
                 "role": "user",
@@ -95,14 +100,15 @@ def call_qwen_ocr(image_path: str, prompt_text: str) -> str:
                 ],
             }
         ],
-        "temperature": TEMPERATURE,
-        "max_tokens": MAX_TOKENS,
-        "stream": STREAM,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": stream,
     }
     headers = {"Content-Type": "application/json"}
 
     try:
-        status_manager.add(f"🔄 Sending OCR request: {Path(image_path).name}")
+        status_manager.add(f"🔄 Sending OCR request to: {base_url}")
+        status_manager.add(f"📸 Processing: {Path(image_path).name}")
         resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=180)
         resp.raise_for_status()
         data = resp.json()
@@ -114,8 +120,16 @@ def call_qwen_ocr(image_path: str, prompt_text: str) -> str:
         status_manager.add("✅ OCR completed successfully.")
         return result
 
-    except requests.exceptions.ConnectionError:
-        status_manager.add("❌ Connection failed. Check BASE_URL or network.")
+    except requests.exceptions.ConnectionError as e:
+        status_manager.add(f"❌ Connection failed: {e}")
+        status_manager.add(f"🔍 Check BASE_URL: {base_url}")
+        raise
+    except requests.exceptions.Timeout:
+        status_manager.add("❌ Request timeout (>180s)")
+        raise
+    except requests.exceptions.HTTPError as e:
+        status_manager.add(f"❌ HTTP Error: {e}")
+        status_manager.add(f"Response: {e.response.text if e.response else 'No response'}")
         raise
     except Exception as e:
         status_manager.add(f"❌ OCR failed: {e}")
@@ -129,6 +143,7 @@ def get_window_state():
     """
     Trả về trạng thái hiển thị mặc định khi khởi động app
     """
-    if IS_MAXIMIZED:
+    is_maximized = get_config_value("is_maximized", True)
+    if is_maximized:
         return "maximized"
     return "normal"

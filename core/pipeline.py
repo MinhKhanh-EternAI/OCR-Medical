@@ -48,7 +48,7 @@ def get_default_output() -> Path:
     Nếu không có thì dùng AppData hoặc fallback về project/data/output.
     """
     try:
-        # 🔧 CHỈNH LẠI ĐƯỜNG DẪN CHO ĐÚNG
+        # 🔧 SỬA: Dùng path giống ocr_extract.py
         config_path = resource_path("config/app_config.json")
 
         if config_path.exists():
@@ -59,12 +59,14 @@ def get_default_output() -> Path:
                 if storage_dir_str and storage_dir_str.strip():
                     storage_path = Path(storage_dir_str)
                     storage_path.mkdir(parents=True, exist_ok=True)
+                    status_manager.add(f"📁 Using storage path: {storage_path}")
                     return storage_path
 
         # Nếu không có config hoặc storage_path trống → AppData
         app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
         default_path = Path(app_data) / "OCR-Medical" / "output"
         default_path.mkdir(parents=True, exist_ok=True)
+        status_manager.add(f"📁 Using AppData path: {default_path}")
         return default_path
 
     except Exception as e:
@@ -72,6 +74,7 @@ def get_default_output() -> Path:
         status_manager.add(f"⚠️ Lỗi load storage path: {e}")
         fallback_path = PROJECT_ROOT / "data" / "output"
         fallback_path.mkdir(parents=True, exist_ok=True)
+        status_manager.add(f"📁 Using fallback path: {fallback_path}")
         return fallback_path
 
 
@@ -90,12 +93,15 @@ def save_text(processed_path: Path, img_name: str, output_root: Path):
         out_dir_text = output_root / img_name / "text"
         out_dir_text.mkdir(parents=True, exist_ok=True)
 
+        status_manager.add(f"🔍 Starting OCR for: {img_name}")
         extracted = call_qwen_ocr(str(processed_path), DEFAULT_PROMPT)
+        
         ocr_path = out_dir_text / f"{img_name}_processed.md"
         with open(ocr_path, "w", encoding="utf-8") as f:
             f.write(extracted)
 
         status_manager.add(f"✅ Đã lưu kết quả OCR: {ocr_path.name}")
+        status_manager.add(f"📄 Full path: {ocr_path}")
     except Exception as e:
         status_manager.add(f"❌ Lỗi lưu OCR: {e}")
         raise
@@ -111,36 +117,65 @@ def process_input(input_path: str, output_root: str = None):
     - Output: original, processed, text (.md)
     """
     status_manager.reset()
+    status_manager.add("=" * 60)
+    status_manager.add("🚀 Starting OCR Pipeline")
+    status_manager.add("=" * 60)
+    
     output_root = Path(output_root) if output_root else DEFAULT_OUTPUT
+    status_manager.add(f"📂 Output directory: {output_root}")
+    
     upscaler = load_waifu2x()
 
     try:
         # Nếu là URL
         if input_path.startswith(("http://", "https://")):
+            status_manager.add(f"🌐 Processing URL: {input_path}")
             response = requests.get(input_path)
             response.raise_for_status()
             img = Image.open(BytesIO(response.content)).convert("RGB")
             img_name = Path(urlparse(input_path).path).stem
             _, proc_path = process_image(upscaler, img, img_name, output_root)
             save_text(proc_path, img_name, output_root)
+            status_manager.add("=" * 60)
+            status_manager.add("✅ Pipeline completed successfully!")
+            status_manager.add("=" * 60)
             return status_manager
 
         # Nếu là file ảnh
         p = Path(input_path)
         if p.is_file():
+            status_manager.add(f"📸 Processing file: {p.name}")
             img = Image.open(p).convert("RGB")
             img_name = p.stem
             _, proc_path = process_image(upscaler, img, img_name, output_root)
             save_text(proc_path, img_name, output_root)
+            status_manager.add("=" * 60)
+            status_manager.add("✅ Pipeline completed successfully!")
+            status_manager.add("=" * 60)
 
         # Nếu là thư mục
         elif p.is_dir():
-            for file in p.glob("*.*"):
-                if file.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]:
-                    img = Image.open(file).convert("RGB")
-                    img_name = file.stem
-                    _, proc_path = process_image(upscaler, img, img_name, output_root)
-                    save_text(proc_path, img_name, output_root)
+            status_manager.add(f"📁 Processing directory: {p}")
+            files = list(p.glob("*.*"))
+            image_files = [f for f in files if f.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]]
+            
+            if not image_files:
+                status_manager.add("⚠️ No image files found in directory")
+                return status_manager
+            
+            status_manager.add(f"📊 Found {len(image_files)} image(s)")
+            
+            for idx, file in enumerate(image_files, 1):
+                status_manager.add("-" * 60)
+                status_manager.add(f"[{idx}/{len(image_files)}] Processing: {file.name}")
+                img = Image.open(file).convert("RGB")
+                img_name = file.stem
+                _, proc_path = process_image(upscaler, img, img_name, output_root)
+                save_text(proc_path, img_name, output_root)
+            
+            status_manager.add("=" * 60)
+            status_manager.add(f"✅ All {len(image_files)} images processed successfully!")
+            status_manager.add("=" * 60)
         else:
             status_manager.add(f"❌ Input không tồn tại: {input_path}")
             raise FileNotFoundError(f"Input {input_path} không tồn tại")
@@ -148,5 +183,7 @@ def process_input(input_path: str, output_root: str = None):
         return status_manager
 
     except Exception as e:
+        status_manager.add("=" * 60)
         status_manager.add(f"❌ Pipeline error: {e}")
+        status_manager.add("=" * 60)
         raise

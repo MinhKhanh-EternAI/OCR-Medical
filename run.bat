@@ -1,6 +1,6 @@
 @echo off
 echo ===========================================================
-echo 🩺 RUNNING OCR-MEDICAL APPLICATION
+echo RUNNING OCR-MEDICAL APPLICATION
 echo ===========================================================
 
 :: Activate virtual environment

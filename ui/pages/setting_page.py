@@ -73,10 +73,19 @@ class SettingPage(BasePage):
         base_label = QLabel("API Base URL:")
         base_row_layout.addWidget(base_label)
 
+        # Thêm label hướng dẫn
+        hint_label = QLabel("Enter host and port only (e.g., 192.168.1.8:1234)")
+        hint_label.setObjectName("HintLabel")
+        hint_label.setStyleSheet("color: gray; font-size: 11px;")
+        base_row_layout.addWidget(hint_label)
+
         self.base_input = QLineEdit()
         self.base_input.setObjectName("SettingLineEdit")
-        self.base_input.setPlaceholderText("http://127.0.0.1:1234/v1")
-        self.base_input.setText(self.config.get("base_url", ""))
+        self.base_input.setPlaceholderText("192.168.1.8:1234")
+        # Lấy base_url từ config và loại bỏ http:// và /v1 để hiển thị
+        base_url = self.config.get("base_url", "")
+        display_url = self._extract_host_port(base_url)
+        self.base_input.setText(display_url)
         self.base_input.setFocusPolicy(Qt.StrongFocus)
         self.base_input.setReadOnly(False)
         self.base_input.setEnabled(True)
@@ -162,7 +171,6 @@ class SettingPage(BasePage):
 
         form_layout.addWidget(store_row)
 
-
         form_layout.addStretch(1)
 
         # =========================
@@ -178,8 +186,32 @@ class SettingPage(BasePage):
         # Thêm form vào root_layout (bên dưới header/divider)
         root_layout.addWidget(self.form)
 
-        # Giữ chân trang
-        
+    # =========================
+    # Helper methods
+    # =========================
+    def _extract_host_port(self, base_url: str) -> str:
+        """Extract host:port from full URL (remove http:// and /v1)."""
+        if not base_url:
+            return ""
+        # Loại bỏ http:// hoặc https://
+        url = base_url.replace("http://", "").replace("https://", "")
+        # Loại bỏ /v1 ở cuối
+        url = url.rstrip("/").replace("/v1", "")
+        return url
+
+    def _build_full_url(self, host_port: str) -> str:
+        """Build full URL from host:port (add http:// and /v1)."""
+        if not host_port:
+            return ""
+        # Loại bỏ khoảng trắng
+        host_port = host_port.strip()
+        # Thêm http:// nếu chưa có
+        if not host_port.startswith(("http://", "https://")):
+            host_port = f"http://{host_port}"
+        # Thêm /v1 nếu chưa có
+        if not host_port.endswith("/v1"):
+            host_port = f"{host_port.rstrip('/')}/v1"
+        return host_port
 
     # =========================
     # Config I/O
@@ -215,9 +247,13 @@ class SettingPage(BasePage):
                 self.token_input.setFocus()
                 return
 
+            # Build full URL from user input
+            host_port = self.base_input.text().strip()
+            full_url = self._build_full_url(host_port)
+
             # Pack config
             self.config["theme"] = self.theme_combo.currentText()
-            self.config["base_url"] = self.base_input.text().strip()
+            self.config["base_url"] = full_url  # Lưu URL đầy đủ
             self.config["temperature"] = temperature
             self.config["max_tokens"] = max_tokens
             self.config["storage_path"] = self.storage_input.text().strip()
@@ -225,8 +261,8 @@ class SettingPage(BasePage):
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
 
-            QMessageBox.information(self, "Saved", "Settings have been successfully updated.")
-            logger.info("✅ Config saved successfully")
+            QMessageBox.information(self, "Saved", f"Settings have been successfully updated.\nFull API URL: {full_url}")
+            logger.info(f"✅ Config saved successfully. Base URL: {full_url}")
 
         except Exception as e:
             logger.error(f"Error saving config: {e}")
