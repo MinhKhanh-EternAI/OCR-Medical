@@ -145,7 +145,7 @@ class SettingPage(BasePage):
 
         self.storage_input = QLineEdit()
         self.storage_input.setObjectName("SettingLineEdit")
-        self.storage_input.setPlaceholderText("Leave empty to use default AppData directory")
+        self.storage_input.setPlaceholderText("Leave empty to use default ./data/output directory")
         self.storage_input.setText(self.config.get("storage_path", ""))
         self.storage_input.setFocusPolicy(Qt.StrongFocus)
         self.storage_input.setReadOnly(False)

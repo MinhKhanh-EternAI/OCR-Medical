@@ -1,98 +1,14 @@
-```bash
-ocr_medical                                    
-├─ assets                                      
-│  ├─ fonts                                    
-│  ├─ gif                                      
-│  │  └─ loading.gif                           
-│  ├─ icon                                     
-│  │  ├─ back-page.svg                         
-│  │  ├─ camera.svg                            
-│  │  ├─ circle.svg                            
-│  │  ├─ close.svg                             
-│  │  ├─ file.svg                              
-│  │  ├─ folder.svg                            
-│  │  ├─ folder_plus.svg                       
-│  │  ├─ full_screen.svg                       
-│  │  ├─ home.svg                              
-│  │  ├─ link.svg                              
-│  │  ├─ more.svg                              
-│  │  ├─ no_image.svg                          
-│  │  ├─ review.svg                            
-│  │  ├─ save.svg                              
-│  │  ├─ scan.svg                              
-│  │  ├─ search.svg                            
-│  │  ├─ setting.svg                           
-│  │  ├─ stop_ocr.svg                          
-│  │  ├─ success.svg                           
-│  │  ├─ upload.svg                            
-│  │  └─ user.svg                              
-│  └─ logo                                     
-│     ├─ logo-text.png                         
-│     └─ logo.png                              
-├─ config                                      
-│  ├─ app_config.json                          
-│  └─ __init__.py                              
-├─ core
-│  ├─ models                                                  
-│  ├─ ocr_extract.py                           
-│  ├─ pipeline.py                              
-│  ├─ process_image.py                         
-│  ├─ status.py                                
-│  ├─ waifu2x_loader.py                        
-│  └─ __init__.py                              
-├─ data                                        
-│  ├─ output                                   
-│  └─ samples                                                        
-├─ ui                                          
-│  ├─ pages                                            
-│  │  ├─ base_page.py                          
-│  │  ├─ extract_info_page.py                  
-│  │  ├─ file_log_page.py                      
-│  │  ├─ home_page.py                          
-│  │  ├─ review_page.py                        
-│  │  ├─ setting_page.py                       
-│  │  └─ __init__.py                           
-│  ├─ style                                    
-│  │  ├─ pages                                 
-│  │  │  ├─ dialogs.qss.tpl                    
-│  │  │  ├─ extract_info_page.qss.tpl          
-│  │  │  ├─ file_log_page.qss.tpl              
-│  │  │  ├─ home_page.qss.tpl                  
-│  │  │  ├─ review_page.qss.tpl                
-│  │  │  ├─ setting_page.qss.tpl               
-│  │  │  └─ style.qss.tpl                      
-│  │  ├─ theme                                 
-│  │  │  ├─ theme_dark.json                    
-│  │  │  └─ theme_light.json                            
-│  │  ├─ style_loader.py                       
-│  │  ├─ theme_manager.py                      
-│  │  └─ __init__.py                           
-│  ├─ widgets                                        
-│  │  ├─ dialog_manager.py                     
-│  │  ├─ side_panel.py                         
-│  │  └─ __init__.py                                       
-│  ├─ main_window.py                           
-│  └─ __init__.py                              
-├─ utils                                       
-│  ├─ helpers.py                               
-│  ├─ logger.py                                
-│  └─ __init__.py                                             
-├─ main.py                                     
-├─ requirements.txt                            
-├─ watch.py                                    
-└─ __init__.py                                 
-```
 
 # 📜 Code chi tiết
 
 ## `base_page.py`
-**Path:** `ocr_medical/ui/pages/base_page.py`
+**Path:** `ui/pages/base_page.py`
 
 ```python
 from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
-from ocr_medical.ui.style.style_loader import load_theme_qss
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_theme_qss
+from ui.style.theme_manager import ThemeManager
 
 
 # Map tên class của page với tên file QSS tương ứng
@@ -162,7 +78,7 @@ class BasePage(QWidget):
 ```
 
 ## `extract_info_page.py`
-**Path:** `ocr_medical/ui/pages/extract_info_page.py`
+**Path:** `ui/pages/extract_info_page.py`
 
 ```python
 from __future__ import annotations
@@ -178,9 +94,9 @@ import logging
 import markdown
 import json
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_svg_colored
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_svg_colored
 import sys
 
 logger = logging.getLogger(__name__)
@@ -210,9 +126,9 @@ class OCRWorker(QThread):
         self._force_stop = False
 
     def run(self):
-        from ocr_medical.core.waifu2x_loader import load_waifu2x
-        from ocr_medical.core.process_image import process_image
-        from ocr_medical.core.ocr_extract import call_qwen_ocr
+        from core.waifu2x_loader import load_waifu2x
+        from core.process_image import process_image
+        from core.ocr_extract import call_qwen_ocr
         from PIL import Image
 
         try:
@@ -267,7 +183,7 @@ class OCRWorker(QThread):
 
                     # Bước 3: Extract information (OCR)
                     self.step_progress.emit(idx, "extract_info")
-                    from ocr_medical.core.pipeline import DEFAULT_PROMPT
+                    from core.pipeline import DEFAULT_PROMPT
                     out_dir_text = self.output_root / img_name / "text"
                     out_dir_text.mkdir(parents=True, exist_ok=True)
 
@@ -824,7 +740,7 @@ class ExtraInfoPage(BasePage):
     #                   Logic
     # =====================================================
     def _load_storage_dir(self) -> Path:
-        """Load storage directory từ config file"""
+        """Load storage directory từ config file, mặc định là ./data/output"""
         config_path = self.project_root / "config" / "app_config.json"
 
         try:
@@ -835,25 +751,19 @@ class ExtraInfoPage(BasePage):
                     if storage_path_str:
                         custom_dir = Path(storage_path_str)
                         if custom_dir.exists():
-                            logger.info(
-                                f"Using custom storage path: {custom_dir}")
+                            logger.info(f"Using custom storage path: {custom_dir}")
                             return custom_dir
                         else:
-                            logger.warning(
-                                f"Storage_path không tồn tại: {custom_dir}")
+                            logger.warning(f"Storage_path không tồn tại: {custom_dir}")
 
-            # Nếu không có config hoặc storage_dir rỗng, dùng AppData mặc định
-            from PySide6.QtCore import QStandardPaths
-            app_data = QStandardPaths.writableLocation(
-                QStandardPaths.AppDataLocation)
-            default_path = Path(app_data) / "OCR-Medical" / "output"
+            # 🔹 Mặc định dùng đường dẫn tương đối data/output
+            default_path = self.project_root / "data" / "output"
             default_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using default AppData directory: {default_path}")
+            logger.info(f"Using default relative directory: {default_path}")
             return default_path
 
         except Exception as e:
-            logger.error(
-                f"Error loading storage directory from config: {str(e)}")
+            logger.error(f"Error loading storage directory: {str(e)}")
             fallback_path = self.project_root / "data" / "output"
             fallback_path.mkdir(parents=True, exist_ok=True)
             return fallback_path
@@ -1299,7 +1209,7 @@ class ExtraInfoPage(BasePage):
 ```
 
 ## `file_log_page.py`
-**Path:** `ocr_medical/ui/pages/file_log_page.py`
+**Path:** `ui/pages/file_log_page.py`
 
 ```python
 from PySide6.QtWidgets import (
@@ -1314,8 +1224,8 @@ from datetime import datetime
 import shutil
 import logging
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 6
@@ -1702,8 +1612,7 @@ class FileLogPage(BasePage):
         self.load_logs()
 
     def _load_storage(self):
-        """Load storage directory từ config file (ưu tiên storage_path nếu có, ngược lại dùng AppData)"""
-        from PySide6.QtCore import QStandardPaths
+        """Load storage directory từ config file (mặc định là ./data/output)"""
         cfg = self.project_root / "config" / "app_config.json"
         try:
             if cfg.exists():
@@ -1717,14 +1626,14 @@ class FileLogPage(BasePage):
                             return custom_dir
                         else:
                             logger.warning(f"⚠️ storage_path không tồn tại: {custom_dir}")
-            # fallback AppData
-            default = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "OCR-Medical" / "output"
+            # 🔹 Mặc định dùng đường dẫn tương đối trong dự án
+            default = self.project_root / "data" / "output"
             default.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using default AppData directory: {default}")
+            logger.info(f"Using default relative directory: {default}")
             return default
         except Exception as e:
             logger.error(f"Error loading storage path: {e}")
-            fallback = Path.cwd() / "data" / "output"
+            fallback = self.project_root / "data" / "output"
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback
 
@@ -1871,9 +1780,10 @@ class FileLogPage(BasePage):
 ```
 
 ## `home_page.py`
-**Path:** `ocr_medical/ui/pages/home_page.py`
+**Path:** `ui/pages/home_page.py`
 
 ```python
+
 from __future__ import annotations
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal, QSize, QStandardPaths
@@ -1887,10 +1797,10 @@ import os
 import logging
 import json
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_svg_colored
-from ocr_medical.ui.widgets.dialog_manager import DialogManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_svg_colored
+from ui.widgets.dialog_manager import DialogManager
 
 # ============= CONSTANTS =============
 VALID_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
@@ -2310,14 +2220,14 @@ class HomePage(BasePage):
         return self.project_root / "assets" / "icon" / icon_name
 
     def _load_storage_dir(self) -> Path:
-        """Load storage directory từ config file (ưu tiên storage_path nếu có, rỗng thì dùng AppLocal)"""
-        from PySide6.QtCore import QStandardPaths
+        """Load storage directory từ config file (ưu tiên storage_path, mặc định là ./data/output)"""
         import json, logging
         from pathlib import Path
         logger = logging.getLogger(__name__)
 
         config_path = self.project_root / "config" / "app_config.json"
         try:
+            # 1️⃣ Ưu tiên đọc từ file config
             if config_path.exists():
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
@@ -2330,16 +2240,19 @@ class HomePage(BasePage):
                         else:
                             logger.warning(f"Storage_path không tồn tại: {custom_dir}")
 
-            app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-            default_path = Path(app_data) / "OCR-Medical" / "output"
+            # 2️⃣ Nếu không có hoặc lỗi → mặc định dùng relative path trong dự án
+            default_path = self.project_root / "data" / "output"
             default_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using default AppData directory: {default_path}")
+            logger.info(f"Using default relative directory: {default_path}")
             return default_path
+
         except Exception as e:
+            # 3️⃣ Fallback nếu lỗi bất thường
             logger.error(f"Error loading storage directory from config: {str(e)}")
             fallback = self.project_root / "data" / "output"
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback
+
 
     def _show_coming_soon_camera(self):
         """Show coming soon message for camera feature"""
@@ -2511,14 +2424,14 @@ class HomePage(BasePage):
 ```
 
 ## `review_page.py`
-**Path:** `ocr_medical/ui/pages/review_page.py`
+**Path:** `ui/pages/review_page.py`
 
 ```python
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, 
                                 QPushButton, QFrame, QSlider, QSpinBox)
 from PySide6.QtCore import Qt
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
 
 
 class ReviewPage(BasePage):
@@ -2654,7 +2567,7 @@ class ReviewPage(BasePage):
 ```
 
 ## `setting_page.py`
-**Path:** `ocr_medical/ui/pages/setting_page.py`
+**Path:** `ui/pages/setting_page.py`
 
 ```python
 from PySide6.QtWidgets import (
@@ -2666,8 +2579,8 @@ from pathlib import Path
 import json
 import logging
 
-from ocr_medical.ui.pages.base_page import BasePage
-from ocr_medical.ui.style.theme_manager import ThemeManager
+from ui.pages.base_page import BasePage
+from ui.style.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -2804,7 +2717,7 @@ class SettingPage(BasePage):
 
         self.storage_input = QLineEdit()
         self.storage_input.setObjectName("SettingLineEdit")
-        self.storage_input.setPlaceholderText("Leave empty to use default AppData directory")
+        self.storage_input.setPlaceholderText("Leave empty to use default ./data/output directory")
         self.storage_input.setText(self.config.get("storage_path", ""))
         self.storage_input.setFocusPolicy(Qt.StrongFocus)
         self.storage_input.setReadOnly(False)
@@ -2900,14 +2813,14 @@ class SettingPage(BasePage):
 ```
 
 ## `dialogs.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/dialogs.qss.tpl`
+**Path:** `ui/style/pages/dialogs.qss.tpl`
 
 ```css
 
 ```
 
 ## `extract_info_page.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/extract_info_page.qss.tpl`
+**Path:** `ui/style/pages/extract_info_page.qss.tpl`
 
 ```css
 /* ============================================================
@@ -3111,7 +3024,7 @@ QTextEdit#ResultContent {
 ```
 
 ## `file_log_page.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/file_log_page.qss.tpl`
+**Path:** `ui/style/pages/file_log_page.qss.tpl`
 
 ```css
 #FileLogPage {
@@ -3236,7 +3149,7 @@ QPushButton#RefreshBtn {
 ```
 
 ## `home_page.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/home_page.qss.tpl`
+**Path:** `ui/style/pages/home_page.qss.tpl`
 
 ```css
 /* Home Page CSS */
@@ -3429,7 +3342,7 @@ QPushButton#RefreshBtn {
 ```
 
 ## `review_page.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/review_page.qss.tpl`
+**Path:** `ui/style/pages/review_page.qss.tpl`
 
 ```css
 /* Review Page CSS */
@@ -3500,7 +3413,7 @@ QPushButton#RefreshBtn {
 ```
 
 ## `setting_page.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/setting_page.qss.tpl`
+**Path:** `ui/style/pages/setting_page.qss.tpl`
 
 ```css
 /* ============================================================
@@ -3573,7 +3486,7 @@ QPushButton#RefreshBtn {
 ```
 
 ## `style.qss.tpl`
-**Path:** `ocr_medical/ui/style/pages/style.qss.tpl`
+**Path:** `ui/style/pages/style.qss.tpl`
 
 ```css
 /* ****************** */
@@ -3671,7 +3584,7 @@ QComboBox:focus {
 ```
 
 ## `theme_light.json`
-**Path:** `ocr_medical/ui/style/theme/theme_light.json`
+**Path:** `ui/style/theme/theme_light.json`
 
 ```json
 {
@@ -3725,7 +3638,7 @@ QComboBox:focus {
 ```
 
 ## `dialog_manager.py`
-**Path:** `ocr_medical/ui/widgets/dialog_manager.py`
+**Path:** `ui/widgets/dialog_manager.py`
 
 ```python
 from PySide6.QtWidgets import QMessageBox
@@ -3926,7 +3839,7 @@ class DialogManager:
 ```
 
 ## `side_panel.py`
-**Path:** `ocr_medical/ui/widgets/side_panel.py`
+**Path:** `ui/widgets/side_panel.py`
 
 ```python
 from __future__ import annotations
@@ -3935,9 +3848,9 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget, QSizePolicy, QSpacerItem, QPushButton
 
-from ocr_medical.ui.style.style_loader import load_svg_colored
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.utils.path_helper import resource_path
+from ui.style.style_loader import load_svg_colored
+from ui.style.theme_manager import ThemeManager
+from utils.path_helper import resource_path
 
 
 # ============================================================
@@ -4080,7 +3993,7 @@ class SidePanel(QWidget):
 ```
 
 ## `main_window.py`
-**Path:** `ocr_medical/ui/main_window.py`
+**Path:** `ui/main_window.py`
 
 ```python
 from __future__ import annotations
@@ -4090,14 +4003,14 @@ from PySide6.QtWidgets import QMainWindow, QWidget, QGridLayout, QStackedWidget,
 
 from pathlib import Path
 
-from ocr_medical.ui.widgets.side_panel import SidePanel
-from ocr_medical.ui.pages.home_page import HomePage
-from ocr_medical.ui.pages.setting_page import SettingPage
-from ocr_medical.ui.pages.file_log_page import FileLogPage
-from ocr_medical.ui.pages.extract_info_page import ExtraInfoPage
-from ocr_medical.ui.pages.review_page import ReviewPage
-from ocr_medical.ui.style.theme_manager import ThemeManager
-from ocr_medical.ui.style.style_loader import load_theme_qss
+from ui.widgets.side_panel import SidePanel
+from ui.pages.home_page import HomePage
+from ui.pages.setting_page import SettingPage
+from ui.pages.file_log_page import FileLogPage
+from ui.pages.extract_info_page import ExtraInfoPage
+from ui.pages.review_page import ReviewPage
+from ui.style.theme_manager import ThemeManager
+from ui.style.style_loader import load_theme_qss
 
 
 MARGIN = 24
@@ -4223,7 +4136,7 @@ class MainWindow(QMainWindow):
 ```
 
 ## `main.py`
-**Path:** `ocr_medical/main.py`
+**Path:** `main.py`
 
 ```python
 from __future__ import annotations
@@ -4232,7 +4145,7 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QGuiApplication
-from ocr_medical.ui.main_window import MainWindow
+from ui.main_window import MainWindow
 
 CONFIG_FILE = Path(__file__).resolve().parent / "config" / "app_config.json"
 
@@ -4297,7 +4210,7 @@ if __name__ == "__main__":
 ```
 
 ## `pipeline.py`
-**Path:** `ocr_medical/core/pipeline.py`
+**Path:** `core/pipeline.py`
 
 ```python
 from pathlib import Path
@@ -4308,11 +4221,11 @@ import json
 from PIL import Image
 from PySide6.QtCore import QStandardPaths
 
-from ocr_medical.core.waifu2x_loader import load_waifu2x
-from ocr_medical.core.process_image import process_image
-from ocr_medical.core.ocr_extract import call_qwen_ocr
-from ocr_medical.core.status import status_manager
-from ocr_medical.utils.path_helper import resource_path
+from core.waifu2x_loader import load_waifu2x
+from core.process_image import process_image
+from core.ocr_extract import call_qwen_ocr
+from core.status import status_manager
+from utils.path_helper import resource_path
 
 # ============================================================
 # 📁 Project root (được dùng khi fallback)
@@ -4454,15 +4367,15 @@ def process_input(input_path: str, output_root: str = None):
 ```
 
 ## `ocr_extract.py`
-**Path:** `ocr_medical/core/ocr_extract.py`
+**Path:** `core/ocr_extract.py`
 
 ```python
 import base64
 import json
 import requests
 from pathlib import Path
-from ocr_medical.core.status import status_manager
-from ocr_medical.utils.path_helper import resource_path
+from core.status import status_manager
+from utils.path_helper import resource_path
 
 
 # =====================================================
@@ -4595,12 +4508,12 @@ def get_window_state():
 ```
 
 ## `process_image.py`
-**Path:** `ocr_medical/core/process_image.py`
+**Path:** `core/process_image.py`
 
 ```python
 from pathlib import Path
 from PIL import Image
-from ocr_medical.core.status import status_manager
+from core.status import status_manager
 
 
 def save_original(img: Image.Image, img_name: str, output_root: Path) -> Path:
@@ -4647,7 +4560,7 @@ def process_image(upscaler, img: Image.Image, img_name: str, output_root: Path) 
 ```
 
 ## `status.py`
-**Path:** `ocr_medical/core/status.py`
+**Path:** `core/status.py`
 
 ```python
 from typing import List
@@ -4677,15 +4590,15 @@ status_manager = StatusManager()
 ```
 
 ## `waifu2x_loader.py`
-**Path:** `ocr_medical/core/waifu2x_loader.py`
+**Path:** `core/waifu2x_loader.py`
 
 ```python
 import torch
 import json
 import logging
 from pathlib import Path
-from ocr_medical.core.status import status_manager
-from ocr_medical.utils.path_helper import resource_path
+from core.status import status_manager
+from utils.path_helper import resource_path
 
 logger = logging.getLogger(__name__)
 
@@ -4810,23 +4723,25 @@ def load_waifu2x(
 ```
 
 ## `app_config.json`
-**Path:** `ocr_medical/config/app_config.json`
+**Path:** `config/app_config.json`
 
 ```json
 {
-  "base_url": "http://192.168.1.12:1234/v1",
-  "temperature": 0.1,
-  "max_tokens": 1500,
-  "stream": false,
-  "storage_path": "",
-  "theme": "light",
-  "is_maximized": true
+  "last_screen": 0,
+  "geometry": [
+    0,
+    23,
+    1920,
+    1009
+  ],
+  "is_maximized": true,
+  "is_fullscreen": false,
+  "theme": "light"
 }
-
 ```
 
 ## `logger.py`
-**Path:** `ocr_medical/utils/logger.py`
+**Path:** `utils/logger.py`
 
 ```python
 

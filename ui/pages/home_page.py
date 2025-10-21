@@ -435,14 +435,14 @@ class HomePage(BasePage):
         return self.project_root / "assets" / "icon" / icon_name
 
     def _load_storage_dir(self) -> Path:
-        """Load storage directory từ config file (ưu tiên storage_path nếu có, rỗng thì dùng AppLocal)"""
-        from PySide6.QtCore import QStandardPaths
+        """Load storage directory từ config file (ưu tiên storage_path, mặc định là ./data/output)"""
         import json, logging
         from pathlib import Path
         logger = logging.getLogger(__name__)
 
         config_path = self.project_root / "config" / "app_config.json"
         try:
+            # 1️⃣ Ưu tiên đọc từ file config
             if config_path.exists():
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
@@ -455,16 +455,19 @@ class HomePage(BasePage):
                         else:
                             logger.warning(f"Storage_path không tồn tại: {custom_dir}")
 
-            app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-            default_path = Path(app_data) / "OCR-Medical" / "output"
+            # 2️⃣ Nếu không có hoặc lỗi → mặc định dùng relative path trong dự án
+            default_path = self.project_root / "data" / "output"
             default_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using default AppData directory: {default_path}")
+            logger.info(f"Using default relative directory: {default_path}")
             return default_path
+
         except Exception as e:
+            # 3️⃣ Fallback nếu lỗi bất thường
             logger.error(f"Error loading storage directory from config: {str(e)}")
             fallback = self.project_root / "data" / "output"
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback
+
 
     def _show_coming_soon_camera(self):
         """Show coming soon message for camera feature"""

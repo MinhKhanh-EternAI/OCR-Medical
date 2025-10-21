@@ -43,15 +43,32 @@ def load_theme_data(theme: str = "light") -> dict:
 
 
 def load_svg_colored(path: Path, color: str, size: int = 20) -> QIcon:
-    """Load SVG và tô lại bằng màu theme"""
+    """Load SVG và tô lại bằng màu theme, có kiểm tra hợp lệ"""
+    if not path.exists():
+        print(f"[WARN] SVG not found: {path}")
+        return QIcon()
+
+    renderer = QSvgRenderer(str(path))
+    if not renderer.isValid():
+        print(f"[WARN] Invalid SVG: {path}")
+        return QIcon()
+
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
 
-    renderer = QSvgRenderer(str(path))
+    # Vẽ SVG gốc
     painter = QPainter(pixmap)
     renderer.render(painter)
-    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-    painter.fillRect(pixmap.rect(), QColor(color))
     painter.end()
 
-    return QIcon(pixmap)
+    # Tạo pixmap màu
+    colored = QPixmap(pixmap.size())
+    colored.fill(Qt.transparent)
+    painter = QPainter(colored)
+    painter.setCompositionMode(QPainter.CompositionMode_Source)
+    painter.fillRect(colored.rect(), QColor(color))
+    painter.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+    painter.drawPixmap(0, 0, pixmap)
+    painter.end()
+
+    return QIcon(colored)

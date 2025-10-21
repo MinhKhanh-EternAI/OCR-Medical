@@ -87,7 +87,7 @@ class SidePanel(QWidget):
         layout.setSpacing(12)
 
         # --- Logo ---
-        logo_path = resource_path("ocr_medical/assets/logo/logo-text.png")
+        logo_path = resource_path("assets/logo/logo-text.png")
         logo_label = QLabel()
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
@@ -108,7 +108,7 @@ class SidePanel(QWidget):
         ]
 
         for key, text, icon_file in pages:
-            icon_path = resource_path(f"ocr_medical/assets/icon/{icon_file}")
+            icon_path = resource_path(f"assets/icon/{icon_file}")
             nav_btn = NavButton(key, text, icon_path, theme_data)
             nav_btn.btn.clicked.connect(lambda checked, k=key: self.page_selected.emit(k))
 
@@ -118,7 +118,7 @@ class SidePanel(QWidget):
         layout.addStretch(1)
 
         # --- User info at bottom ---
-        user_icon_path = resource_path("ocr_medical/assets/icon/user.svg")
+        user_icon_path = resource_path("assets/icon/user.svg")
         user_icon_label = QLabel()
         if user_icon_path.exists():
             user_icon_label.setPixmap(
