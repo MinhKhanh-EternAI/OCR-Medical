@@ -19,10 +19,10 @@ OCR-Medical là ứng dụng desktop (Python + PySide6) giúp trích xuất văn
 
 | Trang | Ảnh minh họa |
 |:------|:--------------|
-| **Home Page** | ![Homepage](docs/screenshots/homepage.png) |
-| **Extract Info Page** | ![Extract Info](docs/screenshots/extract_info_page.png) |
-| **File Log Page** | ![File Log](docs/screenshots/file_log_page.png) |
-| **Setting Page** | ![Setting Page](docs/screenshots/setting_page.png) |
+| **Home Page** | ![Homepage](screenshots/homepage.png) |
+| **Extract Info Page** | ![Extract Info](screenshots/extract_info_page.png) |
+| **File Log Page** | ![File Log](screenshots/file_log_page.png) |
+| **Setting Page** | ![Setting Page](screenshots/setting_page.png) |
 
 ---
 
