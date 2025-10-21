@@ -1,21 +1,32 @@
 # OCR-Medical
 
 OCR-Medical là ứng dụng desktop (Python + PySide6) giúp trích xuất văn bản và bảng biểu từ ảnh y học.  
-Ứng dụng kết hợp mô hình Waifu2x để nâng chất lượng ảnh và Qwen2.5-VL-7B (qua LM Studio) để nhận dạng văn bản.
+Ứng dụng kết hợp mô hình **Waifu2x** để nâng chất lượng ảnh và **Qwen2.5-VL-7B** (qua LM Studio) để nhận dạng văn bản.
 
 ---
 
-## 1. Tính năng
+## 1. Tính năng chính
 
-- Nâng chất lượng ảnh bằng Waifu2x (model art_scan, noise_scale)
-- Trích xuất văn bản và bảng từ ảnh bằng Qwen2.5-VL-7B
-- Tùy chỉnh base_url của LM Studio trong Setting
+- Nâng chất lượng ảnh bằng **Waifu2x** (model *art_scan*, *noise_scale*)
+- Trích xuất văn bản và bảng biểu bằng **Qwen2.5-VL-7B-Instruct**
+- Cấu hình **API Base URL**, **Temperature**, **Max Tokens**, **Storage Directory** trong phần *Settings*
 - Lưu kết quả theo cấu trúc: `data/output/<tên_ảnh>/`
-- Giao diện trực quan bằng PySide6
+- Giao diện trực quan, hỗ trợ đa theme (Light/Dark)
 
 ---
 
-## 2. Cấu trúc dự án
+## 2. Giao diện ứng dụng
+
+| Trang | Ảnh minh họa |
+|:------|:--------------|
+| **Home Page** | ![Homepage](docs/screenshots/homepage.png) |
+| **Extract Info Page** | ![Extract Info](docs/screenshots/extract_info_page.png) |
+| **File Log Page** | ![File Log](docs/screenshots/file_log_page.png) |
+| **Setting Page** | ![Setting Page](docs/screenshots/setting_page.png) |
+
+---
+
+## 3. Cấu trúc dự án
 
 ```
 OCR-MEDICAL/
@@ -31,6 +42,8 @@ OCR-MEDICAL/
 ├─ data/
 │   ├─ samples/
 │   └─ output/
+├─ docs/
+│   └─ screenshots/        ← ảnh minh họa giao diện
 ├─ ui/
 ├─ utils/
 ├─ requirements.txt
@@ -41,31 +54,31 @@ OCR-MEDICAL/
 
 ---
 
-## 3. Cài đặt
+## 4. Cài đặt môi trường
 
-Yêu cầu: Python 3.9+ (khuyên dùng Windows)
+Yêu cầu: **Python 3.9+** (khuyên dùng Windows)
 
-1. Mở Command Prompt trong thư mục dự án.
+1. Mở Command Prompt trong thư mục dự án.  
 2. Chạy:
    ```bash
    setup_env.bat
    ```
    Script này sẽ:
    - Tạo môi trường ảo `.venv`
-   - Cài đặt thư viện cần thiết
+   - Cài đặt toàn bộ thư viện cần thiết
    - Kiểm tra tải model Waifu2x
 
 ---
 
-## 4. Cấu hình LM Studio
+## 5. Cấu hình LM Studio
 
-1. Cài LM Studio: https://lmstudio.ai  
-2. Tải model `Qwen/Qwen2.5-VL-7B-Instruct` và chạy model.
-3. Ghi nhớ endpoint hiển thị, ví dụ:
+1. Cài **LM Studio**: https://lmstudio.ai  
+2. Tải model `Qwen/Qwen2.5-VL-7B-Instruct` và khởi chạy model.  
+3. Ghi nhớ endpoint, ví dụ:
    ```
    http://localhost:1234/v1
    ```
-4. Mở file `config/app_config.json` và chỉnh:
+4. Mở file `config/app_config.json` và chỉnh nội dung:
    ```json
    {
      "base_url": "http://localhost:1234/v1",
@@ -75,7 +88,7 @@ Yêu cầu: Python 3.9+ (khuyên dùng Windows)
 
 ---
 
-## 5. Sử dụng
+## 6. Sử dụng
 
 ### Chạy ứng dụng giao diện:
 ```bash
@@ -91,12 +104,12 @@ process_input("data/samples")
 
 Kết quả được lưu trong `data/output/<tên_ảnh>/` gồm:
 - `original/` : ảnh gốc  
-- `processed/` : ảnh đã nâng chất lượng  
+- `processed/` : ảnh sau khi nâng chất lượng  
 - `text/` : file markdown chứa kết quả OCR
 
 ---
 
-## 6. Làm mới môi trường
+## 7. Làm mới môi trường
 
 ```bash
 rmdir /s /q .venv
@@ -104,3 +117,9 @@ setup_env.bat
 ```
 
 ---
+
+## 8. Thông tin thêm
+
+- **Ngôn ngữ:** Python 3.9+  
+- **Framework:** PySide6  
+- **Model:** Waifu2x + Qwen2.5-VL-7B  
