@@ -398,8 +398,7 @@ class FileLogPage(BasePage):
         self.load_logs()
 
     def _load_storage(self):
-        """Load storage directory từ config file (ưu tiên storage_path nếu có, ngược lại dùng AppData)"""
-        from PySide6.QtCore import QStandardPaths
+        """Load storage directory từ config file (mặc định là ./data/output)"""
         cfg = self.project_root / "config" / "app_config.json"
         try:
             if cfg.exists():
@@ -413,14 +412,14 @@ class FileLogPage(BasePage):
                             return custom_dir
                         else:
                             logger.warning(f"⚠️ storage_path không tồn tại: {custom_dir}")
-            # fallback AppData
-            default = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)) / "OCR-Medical" / "output"
+            # 🔹 Mặc định dùng đường dẫn tương đối trong dự án
+            default = self.project_root / "data" / "output"
             default.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using default AppData directory: {default}")
+            logger.info(f"Using default relative directory: {default}")
             return default
         except Exception as e:
             logger.error(f"Error loading storage path: {e}")
-            fallback = Path.cwd() / "data" / "output"
+            fallback = self.project_root / "data" / "output"
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback
 

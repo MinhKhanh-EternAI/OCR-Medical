@@ -657,7 +657,7 @@ class ExtraInfoPage(BasePage):
     #                   Logic
     # =====================================================
     def _load_storage_dir(self) -> Path:
-        """Load storage directory từ config file"""
+        """Load storage directory từ config file, mặc định là ./data/output"""
         config_path = self.project_root / "config" / "app_config.json"
 
         try:
@@ -668,25 +668,19 @@ class ExtraInfoPage(BasePage):
                     if storage_path_str:
                         custom_dir = Path(storage_path_str)
                         if custom_dir.exists():
-                            logger.info(
-                                f"Using custom storage path: {custom_dir}")
+                            logger.info(f"Using custom storage path: {custom_dir}")
                             return custom_dir
                         else:
-                            logger.warning(
-                                f"Storage_path không tồn tại: {custom_dir}")
+                            logger.warning(f"Storage_path không tồn tại: {custom_dir}")
 
-            # Nếu không có config hoặc storage_dir rỗng, dùng AppData mặc định
-            from PySide6.QtCore import QStandardPaths
-            app_data = QStandardPaths.writableLocation(
-                QStandardPaths.AppDataLocation)
-            default_path = Path(app_data) / "OCR-Medical" / "output"
+            # 🔹 Mặc định dùng đường dẫn tương đối data/output
+            default_path = self.project_root / "data" / "output"
             default_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Using default AppData directory: {default_path}")
+            logger.info(f"Using default relative directory: {default_path}")
             return default_path
 
         except Exception as e:
-            logger.error(
-                f"Error loading storage directory from config: {str(e)}")
+            logger.error(f"Error loading storage directory: {str(e)}")
             fallback_path = self.project_root / "data" / "output"
             fallback_path.mkdir(parents=True, exist_ok=True)
             return fallback_path

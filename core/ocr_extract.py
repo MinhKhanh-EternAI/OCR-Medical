@@ -2,8 +2,7 @@ import base64
 import json
 import requests
 from pathlib import Path
-from 
-core.status import status_manager
+from core.status import status_manager
 from utils.path_helper import resource_path
 
 
