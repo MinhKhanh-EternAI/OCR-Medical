@@ -47,26 +47,11 @@ def main() -> int:
         win.show()
 
     def on_quit():
-        screen = win.windowHandle().screen()
-        idx = screens.index(screen) if screen in screens else 0
-
-        # Đọc config hiện có để merge
+        """Lưu lại thông tin cơ bản khi thoát ứng dụng."""
         existing = load_config()
-
-        # Cập nhật thông tin cửa sổ, giữ nguyên phần khác
         existing.update({
-            "last_screen": idx,
-            "geometry": [
-                win.geometry().x(),
-                win.geometry().y(),
-                win.geometry().width(),
-                win.geometry().height()
-            ],
-            "is_maximized": win.isMaximized(),
-            "is_fullscreen": win.isFullScreen(),
             "theme": win.theme_manager.get_theme_name(),
         })
-
         save_config(existing)
 
     app.aboutToQuit.connect(on_quit)

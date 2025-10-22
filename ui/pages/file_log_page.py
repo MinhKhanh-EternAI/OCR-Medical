@@ -14,7 +14,7 @@ from ui.pages.base_page import BasePage
 from ui.style.theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
-ITEMS_PER_PAGE = 6
+ITEMS_PER_PAGE = 5
 
 
 # =====================================================
@@ -239,7 +239,7 @@ class FolderCard(QFrame):
         status, color = self._get_status()
         badge = QLabel(status)
         badge.setObjectName("StatusBadge")
-        badge.setStyleSheet(f"background:{color}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;")
+        badge.setStyleSheet(f"background:{color}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; min-height: 12px;")
         head.addWidget(badge)
         layout.addLayout(head)
 

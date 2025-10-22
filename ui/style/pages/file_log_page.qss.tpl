@@ -10,7 +10,7 @@
     font-size: 14px;
     background: #FFFFFF;
     color: {{ color.text.primary }};
-    min-height: 32px;
+    min-height: 24px;
 }
 #SearchBar:focus {
     border-color: {{ color.border.focus }};
@@ -31,6 +31,7 @@
     background: #FFFFFF;
     border: 1px solid {{ color.border.default }};
     border-radius: 12px;
+    padding: 6px 12px;
 }
 #FolderCard:hover {
     border-color: {{ color.border.drag_area }};
@@ -53,8 +54,9 @@
 QPushButton {
     border: none;
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 6px;
     font-weight: 600;
+    min-height: 12px;
 }
 QPushButton#ViewBtn {
     background: {{ color.text.secondary }};
